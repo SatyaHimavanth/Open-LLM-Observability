@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Observability</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #09090b; --bg2: #18181b; --bg3: #27272a; --bg-hover: #27272a80;
+    --border: #3f3f46; --border-focus: #52525b; 
+    --text: #fafafa; --text-muted: #a1a1aa;
+    --accent: #10b981; --accent-hover: #059669;
+    --green: #10b981; --blue: #3b82f6; --yellow: #f59e0b; --red: #ef4444; --purple: #8b5cf6;
+    --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 13px; display: flex; height: 100vh; overflow: hidden; }
+
+  /* Inputs & Buttons */
+  input, select, button { font-family: inherit; font-size: 13px; }
+  .btn { background: var(--bg2); border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .btn:hover { background: var(--bg3); border-color: var(--border-focus); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #000; }
+  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #000; }
+  .input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; width: 100%; outline: none; transition: border-color 0.2s; }
+  .input:focus { border-color: var(--accent); }
+
+  /* Layout */
+  #sidebar { width: 240px; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .logo-area { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; color: var(--text); }
+  .logo-icon { width: 20px; height: 20px; background: linear-gradient(135deg, var(--accent), var(--blue)); border-radius: 4px; }
+  .nav-menu { padding: 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+  .nav-item { padding: 8px 12px; border-radius: 6px; cursor: pointer; color: var(--text-muted); transition: all 0.2s; display: flex; align-items: center; gap: 8px; font-weight: 500; }
+  .nav-item:hover { background: var(--bg3); color: var(--text); }
+  .nav-item.active { background: #10b98115; color: var(--accent); }
+  .user-area { padding: 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+
+  #main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); position: relative; }
+  #topbar { height: 53px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 24px; gap: 16px; flex-shrink: 0; background: var(--bg); }
+  .breadcrumbs { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
+  .breadcrumbs span.active { color: var(--text); font-weight: 500; }
+  
+  #content { flex: 1; overflow-y: auto; padding: 24px; }
+
+  /* Tables */
+  .data-table { width: 100%; border-collapse: collapse; text-align: left; }
+  .data-table th { padding: 12px 16px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 500; font-size: 12px; }
+  .data-table td { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .data-table tbody tr { cursor: pointer; transition: background 0.15s; }
+  .data-table tbody tr:hover { background: var(--bg-hover); }
+
+  /* Trace List */
+  .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); display: inline-block; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+
+  /* Detail Drawer */
+  #detail-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 60%; min-width: 500px; background: var(--bg2); border-left: 1px solid var(--border); display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: -4px 0 24px rgba(0,0,0,0.5); z-index: 100; }
+  #detail-drawer.open { transform: translateX(0); }
+  #drawer-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: var(--bg2); }
+  .close-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px; padding: 4px; margin-left: auto; }
+  .close-btn:hover { color: var(--text); }
+  #drawer-tabs { display: flex; border-bottom: 1px solid var(--border); padding: 0 20px; background: var(--bg2); }
+  .tab-btn { padding: 12px 16px; border: none; background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  #drawer-body { flex: 1; overflow-y: auto; padding: 20px; font-family: var(--font-mono); font-size: 12px; }
+
+  /* Auth Overlay */
+  #auth-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+  .auth-card { background: var(--bg2); border: 1px solid var(--border); padding: 32px; border-radius: 12px; width: 360px; box-shadow: var(--shadow); }
+  .auth-title { font-size: 20px; font-weight: 600; margin-bottom: 24px; text-align: center; }
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); }
+  .auth-switch { text-align: center; margin-top: 16px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+  .auth-switch:hover { color: var(--text); }
+  .error-msg { color: var(--red); font-size: 12px; margin-bottom: 12px; text-align: center; }
+
+  /* Modals */
+  #modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 999; display: none; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+  .modal { background: var(--bg2); border: 1px solid var(--border); padding: 24px; border-radius: 8px; width: 400px; }
+
+  /* Tree styles */
+  .span-node { margin-bottom: 4px; }
+  .span-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; border: 1px solid transparent; cursor: pointer; transition: background 0.1s; }
+  .span-row:hover { background: var(--bg3); }
+  .span-row.selected { border-color: var(--border-focus); background: #10b98110; }
+  .span-toggle { color: var(--text-muted); width: 12px; cursor: pointer; text-align: center; font-size: 10px; }
+  .span-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+  .span-name { flex: 1; font-size: 12px; color: var(--text); }
+  .span-model { font-size: 11px; color: var(--text-muted); }
+  .span-tokens { font-size: 11px; color: var(--text-muted); }
+  .span-lat { font-size: 11px; font-weight: 500; }
+  .span-children { margin-left: 18px; margin-top: 2px; border-left: 1px solid var(--border); padding-left: 8px; }
+  .tree-toolbar { margin-bottom: 16px; display: flex; justify-content: flex-end; }
+  pre.msg { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; font-size: 11px; white-space: pre-wrap; word-break: break-word; color: var(--text); margin-top: 8px; overflow-x: auto; max-height: 400px; }
+  
+  .span-detail { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin: 8px 0 12px 20px; }
+  .kv-grid { display: grid; grid-template-columns: 100px 1fr; gap: 8px 12px; }
+  .kv-key { color: var(--text-muted); text-transform: uppercase; font-size: 10px; font-weight: 600; }
+  .kv-val { color: var(--text); font-size: 12px; }
+  .section-title { font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin: 16px 0 8px; letter-spacing: 0.5px; }
+  
+  .flow-message { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 12px; margin-bottom: 8px; }
+  .flow-message-role { color: var(--text-muted); font-size: 10px; text-transform: uppercase; font-weight: 600; margin-bottom: 6px; }
+  
+  .stat-card { background: var(--bg); border: 1px solid var(--border); padding: 16px; border-radius: 8px; }
+  .stat-card .label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; font-weight: 600; margin-bottom: 8px; }
+  .stat-card .value { color: var(--text); font-size: 24px; font-weight: 500; }
+  
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-focus); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="auth-overlay" style="display:none;">
+  <div class="auth-card">
+    <div class="auth-title" id="auth-title">Login</div>
+    <div id="auth-error" class="error-msg"></div>
+    <div class="form-group">
+      <label>Username</label>
+      <input type="text" id="auth-user" class="input" value="admin">
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="auth-pass" class="input" value="password">
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="handleAuth()">Submit</button>
+    <div class="auth-switch" onclick="toggleAuthMode()" id="auth-switch-text">Need an account? Register</div>
+  </div>
+</div>
+
+<div id="sidebar">
+  <div class="logo-area">
+    <div class="logo-icon"></div>
+    Agent Obs
+  </div>
+  <div class="nav-menu">
+    <div class="nav-item active" id="nav-projects" onclick="navTo('projects')">Projects</div>
+    <div class="nav-item" id="nav-settings" onclick="navTo('settings')">Settings</div>
+  </div>
+  <div class="user-area" id="user-info">Not logged in</div>
+</div>
+
+<div id="main-area">
+  <div id="topbar">
+    <div class="breadcrumbs" id="breadcrumbs"><span class="active">Projects</span></div>
+    <div style="margin-left:auto;display:flex;gap:12px;align-items:center;">
+      <span id="ws-status" style="font-size:11px;color:var(--text-muted)">CONNECTING</span>
+      <button class="btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <div id="content">
+    <div id="view-projects">
+      <div style="display:flex;justify-content:space-between;margin-bottom:24px;">
+        <h2>Projects</h2>
+        <button class="btn btn-primary" onclick="showNewProjectModal()">New Project</button>
+      </div>
+      <table class="data-table" id="projects-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Traces</th>
+            <th>Error Rate</th>
+            <th>Total Cost</th>
+            <th>Last Run</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="view-traces" style="display:none;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
+        <input type="text" id="search" class="input" style="width:300px" placeholder="Search traces..." oninput="renderTraces()">
+      </div>
+      <table class="data-table" id="traces-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Trace ID</th>
+            <th>Framework</th>
+            <th>User</th>
+            <th>Cost</th>
+            <th>Tokens</th>
+            <th>Duration</th>
+            <th>Started</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="view-settings" style="display:none;">
+      <h2 style="margin-bottom:24px">Settings</h2>
+      <div class="stat-card" style="max-width:600px;">
+        <div class="label">API Credentials</div>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">Use these credentials in your .env file to send traces.</p>
+        <div class="form-group">
+          <label>CLIENT ID</label>
+          <input type="text" class="input" id="set-client-id" readonly style="font-family:var(--font-mono);font-size:12px;background:var(--bg2)">
+        </div>
+        <div class="form-group">
+          <label>CLIENT SECRET</label>
+          <input type="text" class="input" id="set-client-secret" readonly style="font-family:var(--font-mono);font-size:12px;background:var(--bg2)">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="detail-drawer">
+    <div id="drawer-header">
+      <div class="status-dot" id="d-status"></div>
+      <span id="d-id" style="font-family:var(--font-mono);font-size:13px;"></span>
+      <span class="badge" id="d-fw"></span>
+      <button class="close-btn" onclick="closeDrawer()">×</button>
+    </div>
+    <div id="drawer-tabs">
+      <button class="tab-btn active" onclick="switchTab('tree',this)">Tree</button>
+      <button class="tab-btn" onclick="switchTab('stats',this)">Stats</button>
+      <button class="tab-btn" onclick="switchTab('user',this)">User Details</button>
+      <button class="tab-btn" onclick="switchTab('raw',this)">JSON</button>
+    </div>
+    <div id="drawer-body"></div>
+  </div>
+</div>
+
+<div id="modal-overlay">
+  <div class="modal">
+    <h3 style="margin-bottom:16px">New Project</h3>
+    <div class="form-group">
+      <label>Project Name</label>
+      <input type="text" id="new-proj-name" class="input">
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:24px;">
+      <button class="btn" onclick="document.getElementById('modal-overlay').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" onclick="createProject()">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Base Application State
+let currentUser = null;
+let isRegisterMode = false;
+let currentView = 'projects';
+let selectedProject = null;
+
+let traces = {};
+let projects = {};
+let spanCache = {};
+let activeTrace = null;
+let activeSpan = null;
+let activeTab = "tree";
+let showRawSpanDetails = false;
+let ws = null;
+
+// Initialization
+window.onload = () => {
+  const stored = localStorage.getItem('obs_user');
+  if (stored) {
+    currentUser = JSON.parse(stored);
+    initApp();
+  } else {
+    document.getElementById('auth-overlay').style.display = 'flex';
+  }
+};
+
+function toggleAuthMode() {
+  isRegisterMode = !isRegisterMode;
+  document.getElementById('auth-title').textContent = isRegisterMode ? 'Register' : 'Login';
+  document.getElementById('auth-switch-text').textContent = isRegisterMode ? 'Already have an account? Login' : 'Need an account? Register';
+  document.getElementById('auth-error').textContent = '';
+}
+
+async function handleAuth() {
+  const u = document.getElementById('auth-user').value;
+  const p = document.getElementById('auth-pass').value;
+  const endpoint = isRegisterMode ? '/register' : '/login';
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: u, password: p})
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Auth failed');
+    const data = await res.json();
+    currentUser = data;
+    localStorage.setItem('obs_user', JSON.stringify(data));
+    document.getElementById('auth-overlay').style.display = 'none';
+    initApp();
+  } catch (e) {
+    document.getElementById('auth-error').textContent = e.message;
+  }
+}
+
+function logout() {
+  localStorage.removeItem('obs_user');
+  location.reload();
+}
+
+function initApp() {
+  document.getElementById('user-info').textContent = currentUser.username;
+  document.getElementById('set-client-id').value = currentUser.client_id;
+  document.getElementById('set-client-secret').value = currentUser.client_secret;
+  fetchProjects();
+  connect();
+}
+
+async function fetchProjects() {
+  try {
+    const res = await fetch(`/projects?user_id=${currentUser.id}`);
+    const data = await res.json();
+    projects = {};
+    data.forEach(p => projects[p.name] = p);
+    renderProjects();
+  } catch (e) {}
+}
+
+function navTo(view) {
+  currentView = view;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.getElementById(`nav-${view}`)?.classList.add('active');
+  
+  document.getElementById('view-projects').style.display = view === 'projects' ? 'block' : 'none';
+  document.getElementById('view-traces').style.display = view === 'traces' ? 'block' : 'none';
+  document.getElementById('view-settings').style.display = view === 'settings' ? 'block' : 'none';
+  
+  if (view === 'projects') {
+    document.getElementById('breadcrumbs').innerHTML = `<span class="active">Projects</span>`;
+    fetchProjects();
+  } else if (view === 'traces') {
+    document.getElementById('breadcrumbs').innerHTML = `<span style="cursor:pointer;color:var(--blue)" onclick="navTo('projects')">Projects</span> <span>/</span> <span class="active">${selectedProject}</span>`;
+    renderTraces();
+  } else if (view === 'settings') {
+    document.getElementById('breadcrumbs').innerHTML = `<span class="active">Settings</span>`;
+  }
+}
+
+function openProject(name) {
+  selectedProject = name;
+  navTo('traces');
+}
+
+function showNewProjectModal() {
+  document.getElementById('new-proj-name').value = '';
+  document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+async function createProject() {
+  const name = document.getElementById('new-proj-name').value;
+  if (!name) return;
+  await fetch(`/projects?user_id=${currentUser.id}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name})
+  });
+  document.getElementById('modal-overlay').style.display = 'none';
+  fetchProjects();
+}
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws?user_id=${currentUser.id}`);
+  ws.onopen = () => { document.getElementById("ws-status").textContent = "LIVE"; document.getElementById("ws-status").style.color = "var(--green)"; };
+  ws.onclose = () => { document.getElementById("ws-status").textContent = "DISCONNECTED"; document.getElementById("ws-status").style.color = "var(--red)"; setTimeout(connect, 2000); };
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "init") {
+      msg.traces.forEach(t => { traces[t.trace_id] = t; });
+      (msg.projects || []).forEach(p => { projects[p.name] = p; });
+      if (currentView === 'projects') renderProjects();
+      if (currentView === 'traces') renderTraces();
+    } else if (msg.type === "span") {
+      traces[msg.summary.trace_id] = msg.summary;
+      fetchProjects();
+      delete spanCache[msg.summary.trace_id];
+      if (currentView === 'traces') renderTraces();
+      if (activeTrace === msg.summary.trace_id) loadTrace(activeTrace);
+    }
+  };
+}
+
+function renderProjects() {
+  const tbody = document.querySelector('#projects-table tbody');
+  tbody.innerHTML = Object.values(projects).map(p => `
+    <tr onclick="openProject('${p.name}')">
+      <td><span style="font-weight:500;color:var(--text)">${esc(p.name)}</span></td>
+      <td>${p.trace_count}</td>
+      <td>${(p.error_rate * 100).toFixed(1)}%</td>
+      <td>$${(p.total_cost||0).toFixed(4)}</td>
+      <td>${p.most_recent_run ? new Date(p.most_recent_run * 1000).toLocaleString() : '-'}</td>
+      <td style="text-align:right">
+        <button class="btn" style="padding:4px 8px;color:var(--red);border-color:var(--red)" onclick="deleteProject('${p.name}', event)">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function renderTraces() {
+  if (currentView !== 'traces') return;
+  const q = (document.getElementById("search").value || "").toLowerCase();
+  const all = Object.values(traces).filter(t => (t.project_name || "default") === selectedProject).sort((a,b) => b.started_at - a.started_at);
+  const filtered = all.filter(t => {
+    if (!q) return true;
+    return (t.trace_id + t.framework + JSON.stringify(t.user || {}) + (t.tags || []).join("") + (t.agents||[]).join("") + (t.models||[]).join("")).toLowerCase().includes(q);
+  });
+  
+  document.querySelector('#traces-table tbody').innerHTML = filtered.map(t => `
+    <tr onclick="loadTrace('${t.trace_id}')">
+      <td><div class="status-dot" style="background:${statusColor(t.status)}"></div>${t.status}</td>
+      <td style="font-family:var(--font-mono);font-size:12px;">${t.trace_id.split("-")[0]}</td>
+      <td><span class="badge">${t.framework}</span></td>
+      <td><span style="font-size:12px;color:var(--text-muted)">${getUserName(t)}</span></td>
+      <td>$${(t.total_cost||0).toFixed(4)}</td>
+      <td title="Input: ${fmtNum(t.total_tokens?.prompt)} | Reasoning: ${fmtNum(t.total_tokens?.reasoning)} | Output: ${fmtNum(t.total_tokens?.completion)}">${fmtNum(t.total_tokens?.total)}</td>
+      <td>${fmtMs(t.duration_ms)}</td>
+      <td>${new Date(t.started_at * 1000).toLocaleTimeString()}</td>
+      <td style="text-align:right">
+        <button class="btn" style="padding:4px 8px;color:var(--red);border-color:var(--red)" onclick="deleteTrace('${t.trace_id}', event)">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function loadTrace(tid) {
+  activeTrace = tid;
+  activeSpan = null;
+  document.getElementById('detail-drawer').classList.add('open');
+  
+  if (!spanCache[tid]) {
+    const r = await fetch(`/traces/${tid}`);
+    spanCache[tid] = await r.json();
+  }
+  
+  const data = spanCache[tid];
+  const t = traces[tid];
+  document.getElementById('d-status').style.background = statusColor(t.status);
+  document.getElementById('d-id').innerHTML = `${tid} <button onclick="navigator.clipboard.writeText('${tid}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted);margin-left:4px;" title="Copy Trace ID">📋</button>`;
+  document.getElementById('d-fw').textContent = t.framework;
+  
+  renderTab(data);
+}
+
+function closeDrawer() {
+  document.getElementById('detail-drawer').classList.remove('open');
+  activeTrace = null;
+}
+
+function switchTab(name, btn) {
+  activeTab = name;
+  document.querySelectorAll('#drawer-tabs .tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if (activeTrace && spanCache[activeTrace]) renderTab(spanCache[activeTrace]);
+}
+
+function renderTab(data) {
+  const body = document.getElementById("drawer-body");
+  if (activeTab === "tree") body.innerHTML = renderFlowTab(data);
+  if (activeTab === "stats") body.innerHTML = renderStats(data);
+  if (activeTab === "user") body.innerHTML = renderUserDetails(data);
+  if (activeTab === "raw") body.innerHTML = `<pre class="msg">${esc(JSON.stringify(data, null, 2))}</pre>`;
+}
+
+// Utility formatting functions
+function fwColor(fw) {
+  const map = { langchain:"#1c7ed6", crewai:"#f03e3e", autogen:"#7048e8", "google-adk":"#2f9e44", "google_adk":"#2f9e44", "openai-agents":"#00a67e", llamaindex:"#e67700", custom:"#888" };
+  return map[fw] || "#666";
+}
+function statusColor(s) { return s === "done" ? "#2f9e44" : s === "error" ? "#f03e3e" : s === "cancelled" ? "#e8590c" : "#ffd43b"; }
+function fmtMs(ms) { if (!ms) return "-"; if (ms < 1000) return ms.toFixed(0) + "ms"; return (ms/1000).toFixed(2) + "s"; }
+function fmtNum(n) { if (!n) return "0"; return n.toLocaleString(); }
+function esc(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function resourceColor(r) { return {llm:"#3b82f6",tool:"#10b981",agent:"#f59e0b",chain:"#8b5cf6"}[r]||"#888"; }
+function eventIcon(e) { if (e?.includes("start")) return ">"; if (e?.includes("end") || e?.includes("finish")) return "stop"; if (e?.includes("error")) return "x"; return "-"; }
+
+// Trace Detail Rendering
+function renderFlowTab(data) {
+  return `
+    <div class="tree-toolbar">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-muted)">
+        <input type="checkbox" ${showRawSpanDetails ? "checked" : ""} onchange="toggleRawSpanDetails(this.checked)"> Full span JSON
+      </label>
+    </div>
+    ${renderFlow(data.spans || [])}
+  `;
+}
+
+function toggleRawSpanDetails(checked) {
+  showRawSpanDetails = checked;
+  if (activeTrace && spanCache[activeTrace]) renderTab(spanCache[activeTrace]);
+}
+
+function renderFlow(spans) {
+  const steps = buildFlowSteps(spans);
+  return steps.map(step => renderFlowStep(step)).join("");
+}
+
+function buildFlowSteps(spans) {
+  const sorted = [...spans].sort((a,b) => (a.ts_start||0) - (b.ts_start||0));
+  const byParent = {};
+  sorted.forEach(s => {
+    if (s.parent_span) {
+      if (!byParent[s.parent_span]) byParent[s.parent_span] = [];
+      byParent[s.parent_span].push(s);
+    }
+  });
+
+  const consumed = new Set();
+  const steps = [];
+
+  sorted.forEach(s => {
+    if (consumed.has(s.span_id) || isEndEvent(s.event)) return;
+
+    if (s.event === "agent_stream_start" || s.event === "agent_invoke_start") {
+      const end = findEndSpan(s, byParent);
+      if (end) consumed.add(end.span_id);
+      steps.push({kind:"agent", start:s, end});
+      return;
+    }
+
+    if (s.event === "llm_start") {
+      const end = findEndSpan(s, byParent);
+      if (end) consumed.add(end.span_id);
+      steps.push({kind:"llm", start:s, end});
+      return;
+    }
+
+    if (s.event === "tool_start") {
+      const end = findEndSpan(s, byParent);
+      if (end) consumed.add(end.span_id);
+      steps.push({kind:"tool", start:s, end});
+      return;
+    }
+
+    steps.push({kind:s.resource||"span", start:s});
+  });
+
+  return steps;
+}
+
+function isEndEvent(event) { return event?.includes("_end") || event?.includes("_error") || event === "llm_error" || event === "tool_error"; }
+function findEndSpan(start, byParent) { return (byParent[start.span_id] || []).filter(s => isEndEvent(s.event)).sort((a,b) => (a.ts_start||0) - (b.ts_start||0))[0]; }
+
+function renderFlowStep(step) {
+  const s = step.start;
+  const end = step.end;
+  const sid = s.span_id;
+  const selected = sid === activeSpan;
+  const label = flowLabel(step);
+  const model = s.model ? `<span class="span-model">${esc(s.model)}</span>` : "";
+  const tokens = end?.tokens?.total ? `<span class="span-tokens">${fmtNum(end.tokens.total)} tok</span>` : "";
+  const latency = fmtMs(end?.latency_ms || s.latency_ms);
+  const color = resourceColor(s.resource);
+
+  return `
+    <div class="flow-step">
+      <div class="span-row ${selected?'selected':''}" onclick="selectSpan('${sid}',event)">
+        <span class="span-toggle">${selected ? "v" : ">"}</span>
+        <span class="span-badge" style="background:${color}22;color:${color}">${s.resource||"span"}</span>
+        <span class="span-name">${eventIcon(s.event)} ${label}</span>
+        ${model}
+        ${tokens}
+        <span class="span-lat" style="color:${color}">${latency}</span>
+      </div>
+      ${selected ? renderFlowDetail(step) : ""}
+    </div>
+  `;
+}
+
+function flowLabel(step) {
+  const s = step.start;
+  if (step.kind === "agent") return s.agent_name || "Agent run";
+  if (step.kind === "llm") return toolCallsFromSpan(step.end).length ? "Tool decision" : "Model response";
+  if (step.kind === "tool") return s.tool_name || "Tool call";
+  return s.agent_name || s.tool_name || s.event || "span";
+}
+
+function renderFlowDetail(step) {
+  if (showRawSpanDetails) return detailBox(`<pre class="msg">${esc(JSON.stringify(step.end ? {start: step.start, end: step.end} : step.start, null, 2))}</pre>`);
+  if (step.kind === "agent") return renderAgentDetail(step);
+  if (step.kind === "llm") return renderLlmDetail(step);
+  if (step.kind === "tool") return renderToolDetail(step);
+  return renderSpanSummary(step.start, step.end);
+}
+
+function renderAgentDetail(step) {
+  const input = step.start.meta?.input?.messages || [];
+  return detailBox(`
+    <div class="kv-grid">
+      <div class="kv-key">Status</div><div class="kv-val">${step.end ? "Completed" : "Running"}</div>
+      <div class="kv-key">Duration</div><div class="kv-val">${fmtMs(step.end?.latency_ms)}</div>
+    </div>
+    ${input.length ? `<div class="section-title">User Input</div>${input.map(renderMessage).join("")}` : ""}
+  `);
+}
+
+function renderLlmDetail(step) {
+  const start = step.start;
+  const end = step.end;
+  const messages = (start.messages || []).flatMap(m => Array.isArray(m) ? m : [m]);
+  const calls = toolCallsFromSpan(end);
+  const responseText = (end?.response?.generations || []).flat().map(g => g.text || "").filter(Boolean).join("\n\n");
+
+  return detailBox(`
+    ${messages.length ? `<div class="section-title">Prompt</div>${messages.map(renderMessage).join("")}` : ""}
+    ${calls.length ? `<div class="section-title">Tool Calls Requested</div><pre class="msg">${esc(JSON.stringify(calls, null, 2))}</pre>` : ""}
+    ${responseText ? `<div class="section-title">Model Response</div><pre class="msg">${esc(responseText)}</pre>` : ""}
+    ${end?.tokens ? `<div class="section-title">Usage</div><div class="kv-grid"><div class="kv-key">Total</div><div class="kv-val">${fmtNum(end.tokens.total)}</div></div>` : ""}
+  `);
+}
+
+function renderToolDetail(step) {
+  const start = step.start;
+  const end = step.end;
+  const out = end?.tool_output;
+  const cleanOut = out ? (String(out).match(/content='([^']*)'/) ? String(out).match(/content='([^']*)'/)[1] : String(out)) : null;
+  return detailBox(`
+    <div class="kv-grid">
+      <div class="kv-key">Tool</div><div class="kv-val">${esc(start.tool_name || "")}</div>
+      <div class="kv-key">Latency</div><div class="kv-val">${fmtMs(end?.latency_ms)}</div>
+    </div>
+    ${start.tool_input ? `<div class="section-title">Input</div><pre class="msg">${esc(JSON.stringify(start.tool_input.input ?? start.tool_input, null, 2))}</pre>` : ""}
+    ${cleanOut ? `<div class="section-title">Output</div><pre class="msg">${esc(cleanOut)}</pre>` : ""}
+  `);
+}
+
+function renderSpanSummary(start, end) {
+  return detailBox(`
+    <div class="kv-grid">
+      <div class="kv-key">Event</div><div class="kv-val">${esc(start.event || "")}</div>
+      <div class="kv-key">Latency</div><div class="kv-val">${fmtMs(end?.latency_ms || start.latency_ms)}</div>
+    </div>
+  `);
+}
+
+function detailBox(inner) { return `<div class="span-detail">${inner}</div>`; }
+function selectSpan(sid, e) { e.stopPropagation(); activeSpan = activeSpan === sid ? null : sid; renderTab(spanCache[activeTrace]); }
+function renderMessage(m) {
+  const role = m.role || m.type || "message";
+  let content = typeof m === "string" ? m : m.content;
+  if (content === undefined || content === null) {
+      content = JSON.stringify(m, null, 2);
+  } else if (typeof content === "object") {
+      content = JSON.stringify(content, null, 2);
+  }
+  return `<div class="flow-message"><div class="flow-message-role">${esc(role)}</div><pre style="white-space: pre-wrap; font-family: inherit; margin: 0;">${esc(String(content || ""))}</pre></div>`;
+}
+function toolCallsFromSpan(span) { return (span?.response?.generations || []).flat().flatMap(g => g.tool_calls || []); }
+
+function renderStats(data) {
+  const t = traces[activeTrace];
+  return `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <div class="stat-card"><div class="label">Total Spans</div><div class="value">${t.span_count}</div></div>
+      <div class="stat-card"><div class="label">LLM Calls</div><div class="value">${t.llm_calls}</div></div>
+      <div class="stat-card"><div class="label">Total Tokens</div><div class="value">${fmtNum(t.total_tokens?.total)}</div></div>
+      <div class="stat-card"><div class="label">Total Cost</div><div class="value">$${(t.total_cost||0).toFixed(4)}</div></div>
+    </div>
+  `;
+}
+
+function getUserName(t) {
+  if (!t.user || Object.keys(t.user).length === 0) return "Empty";
+  return esc(t.user.name || "None");
+}
+
+function renderUserDetails(data) {
+  const t = traces[activeTrace] || data.summary;
+  if (!t || !t.user || Object.keys(t.user).length === 0) {
+    return `<div class="span-detail"><div class="section-title">User Details</div><p style="color:var(--text-muted)">Empty</p></div>`;
+  }
+  
+  const u = t.user;
+  const name = u.name || "None";
+  const email = u.email || "None";
+  const id = u.id || "None";
+  
+  return `
+    <div class="span-detail">
+      <div class="section-title">User Details</div>
+      <div class="kv-grid">
+        <div class="kv-key">Name</div><div class="kv-val">${esc(name)}</div>
+        <div class="kv-key">Email</div><div class="kv-val">${esc(email)}</div>
+        <div class="kv-key">ID</div><div class="kv-val">${esc(id)}</div>
+      </div>
+      ${u.role ? `<div class="kv-grid" style="margin-top:8px"><div class="kv-key">Role</div><div class="kv-val">${esc(u.role)}</div></div>` : ""}
+    </div>
+  `;
+}
+
+async function deleteProject(name, event) {
+  event.stopPropagation();
+  if (!confirm(`Are you sure you want to delete project '${name}' and all its traces?`)) return;
+  try {
+    await fetch(`/projects/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    delete projects[name];
+    if (selectedProject === name) navTo('projects');
+    renderProjects();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function deleteTrace(tid, event) {
+  event.stopPropagation();
+  if (!confirm('Are you sure you want to delete this trace?')) return;
+  try {
+    await fetch(`/traces/${encodeURIComponent(tid)}`, { method: 'DELETE' });
+    delete traces[tid];
+    if (activeTrace === tid) closeDrawer();
+    renderTraces();
+    // Also re-fetch projects to update counts
+    fetchProjects();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+</script>
+</body>
+</html>
