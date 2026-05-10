@@ -394,11 +394,17 @@ def _project_summaries(session, user_id: Optional[str] = None, include_archived:
             "p99_latency_ms": _percentile(latencies, 99),
             "total_tokens": sum((r.get("total_tokens") or {}).get("total") or 0 for r in rows),
             "total_cost": round(sum(r.get("total_cost") or 0 for r in rows), 6),
-            "users": sorted({
-                (r.get("user") or {}).get("email") or (r.get("user") or {}).get("name")
-                for r in rows
-                if r.get("user")
-            }),
+            "users": sorted(
+                user
+                for user in {
+                    (r.get("user") or {}).get("email")
+                    or (r.get("user") or {}).get("name")
+                    or (r.get("user") or {}).get("id")
+                    for r in rows
+                    if r.get("user")
+                }
+                if user
+            ),
         })
     return sorted(projects, key=lambda p: p["most_recent_run"], reverse=True)
 
@@ -424,6 +430,10 @@ def _summary_from_spans(trace_id: str, spans: list[dict]) -> dict:
     models = sorted({s["model"] for s in spans if s.get("model")})
     project_name = next((s.get("project_name") for s in spans if s.get("project_name")), DEFAULT_PROJECT_NAME)
     user = next((s.get("user") for s in spans if s.get("user")), None)
+    if user is None:
+        system_user_id = next((s.get("system_user_id") for s in spans if s.get("system_user_id")), None)
+        if system_user_id:
+            user = {"id": system_user_id, "source": "system"}
     tags = sorted({
         tag
         for s in spans

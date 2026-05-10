@@ -51,6 +51,12 @@ def install():
     _try("autogen", install_autogen)
     _try("openai-agents", install_openai_agents)
 
+    from .interceptors.google_adk import install as gadk
+    _try("google-adk", gadk)
+
+    from .interceptors.google_genai import install as ggenai
+    _try("google-genai", ggenai)
+
     # ── HTTP transport fallback (catches everything else) ───────
     from .interceptors.http import install as http
     _try("http", http)

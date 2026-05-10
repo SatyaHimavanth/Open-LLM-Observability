@@ -4,7 +4,7 @@ Patches httpx.Client and requests.Session to capture any LLM call
 that isn't covered by a framework-specific callback.
 """
 
-import json, time
+import json, time, uuid
 from ..core import Span, emit, get_or_new_trace, _current_span, detect_provider
 
 LLM_HOSTS = (
@@ -40,10 +40,34 @@ def _parse_response(response) -> dict:
         return {}
 
 def _build_span(req_body: dict, resp_body: dict, latency_ms: float, status: int) -> Span:
-    model   = req_body.get("model", "")
+    model   = req_body.get("model", "") or resp_body.get("modelVersion", "")
+
+    # ── Token usage: OpenAI format or Gemini format ──
     tokens  = resp_body.get("usage", {})
+    if not tokens:
+        # Gemini API uses usageMetadata with different key names
+        gemini_usage = resp_body.get("usageMetadata", {})
+        if gemini_usage:
+            tokens = {
+                "prompt_tokens": gemini_usage.get("promptTokenCount"),
+                "completion_tokens": gemini_usage.get("candidatesTokenCount"),
+                "total_tokens": gemini_usage.get("totalTokenCount"),
+            }
+
+    # ── Response content: OpenAI format or Gemini format ──
     content = resp_body.get("choices", [{}])[0].get("message") \
               or resp_body.get("content", [])
+    if not content:
+        # Gemini API uses candidates[].content.parts[].text
+        candidates = resp_body.get("candidates", [])
+        if candidates:
+            parts = (candidates[0].get("content") or {}).get("parts", [])
+            text_parts = [p.get("text", "") for p in parts if p.get("text")]
+            if text_parts:
+                content = "\n".join(text_parts)
+
+    # ── Messages/contents: OpenAI uses "messages", Gemini uses "contents" ──
+    messages = req_body.get("messages") or req_body.get("contents")
 
     return Span(
         trace_id    = get_or_new_trace(),
@@ -52,7 +76,7 @@ def _build_span(req_body: dict, resp_body: dict, latency_ms: float, status: int)
         resource    = "llm",
         model       = model,
         provider    = detect_provider(model),
-        messages    = req_body.get("messages"),
+        messages    = messages,
         response    = {"content": content} if content else None,
         tokens      = {
             "prompt":     tokens.get("prompt_tokens") or tokens.get("input_tokens"),
@@ -75,12 +99,24 @@ def patch_httpx():
         def _send(self, request, **kw):
             if not _is_llm_url(request.url) or _current_span():
                 return _orig(self, request, **kw)
+            req_body = _parse_request(request)
+            start_span_id = str(uuid.uuid4())
+            trace_id = get_or_new_trace()
+            emit(Span(
+                span_id=start_span_id,
+                trace_id=trace_id,
+                event="llm_start",
+                resource="llm",
+                model=req_body.get("model", ""),
+                messages=req_body.get("messages") or req_body.get("contents"),
+                meta={"capture_via": "http_intercept"},
+            ))
             t0       = time.perf_counter()
             response = _orig(self, request, **kw)
             latency  = (time.perf_counter() - t0) * 1000
-            req_body = _parse_request(request)
             resp_body= _parse_response(response)
             span     = _build_span(req_body, resp_body, latency, response.status_code)
+            span.parent_span = start_span_id
             emit(span)
             return response
 
@@ -92,12 +128,24 @@ def patch_httpx():
         async def _async_send(self, request, **kw):
             if not _is_llm_url(request.url) or _current_span():
                 return await _orig_async(self, request, **kw)
+            req_body = _parse_request(request)
+            start_span_id = str(uuid.uuid4())
+            trace_id = get_or_new_trace()
+            emit(Span(
+                span_id=start_span_id,
+                trace_id=trace_id,
+                event="llm_start",
+                resource="llm",
+                model=req_body.get("model", ""),
+                messages=req_body.get("messages") or req_body.get("contents"),
+                meta={"capture_via": "http_intercept"},
+            ))
             t0       = time.perf_counter()
             response = await _orig_async(self, request, **kw)
             latency  = (time.perf_counter() - t0) * 1000
-            req_body = _parse_request(request)
             resp_body= _parse_response(response)
             span     = _build_span(req_body, resp_body, latency, response.status_code)
+            span.parent_span = start_span_id
             emit(span)
             return response
 

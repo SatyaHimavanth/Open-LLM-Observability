@@ -77,6 +77,9 @@ uv sync --extra langchain
 # Bundled test agent: LangChain + Azure OpenAI + dotenv
 uv sync --extra agent
 
+# Google ADK and Google GenAI support
+uv sync --extra google
+
 # CrewAI support
 uv sync --extra crewai
 
@@ -236,6 +239,9 @@ samples/
         prompts.py
         tools.py
     llms.py
+  google_example/
+    simple_llm/
+    simple_agent/
 
 universal_agent_obs/
   __init__.py         # Auto-installs interceptors on import
@@ -245,6 +251,8 @@ universal_agent_obs/
   interceptors/
     langchain.py      # LangChain/LangGraph tracing
     http.py           # HTTP LLM fallback tracing
+    google_adk.py     # Google ADK runner/event tracing
+    google_genai.py   # Google GenAI SDK tracing
     crewai.py         # CrewAI hooks
     agents.py         # AutoGen/OpenAI Agents hooks
   server/

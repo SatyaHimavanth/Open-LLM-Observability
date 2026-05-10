@@ -1,0 +1,34 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e13]:
+    - generic [ref=e14]: Agent Obs
+    - generic [ref=e16]:
+      - generic [ref=e17] [cursor=pointer]: Projects
+      - generic [ref=e18] [cursor=pointer]: Settings
+    - generic [ref=e19]: admin
+  - generic [ref=e20]:
+    - generic [ref=e21]:
+      - generic [ref=e23]: Projects
+      - generic [ref=e24]:
+        - generic [ref=e25]: DISCONNECTED
+        - button "Logout" [ref=e26] [cursor=pointer]
+    - generic [ref=e28]:
+      - generic [ref=e29]:
+        - heading "Projects" [level=2] [ref=e30]
+        - button "New Project" [ref=e31] [cursor=pointer]
+      - table [ref=e32]:
+        - rowgroup [ref=e33]:
+          - row "Name Traces Error Rate Total Cost Last Run" [ref=e34]:
+            - columnheader "Name" [ref=e35]
+            - columnheader "Traces" [ref=e36]
+            - columnheader "Error Rate" [ref=e37]
+            - columnheader "Total Cost" [ref=e38]
+            - columnheader "Last Run" [ref=e39]
+            - columnheader [ref=e40]
+        - rowgroup
+    - generic [ref=e41]:
+      - button "×" [ref=e45] [cursor=pointer]
+      - generic [ref=e46]:
+        - button "Tree" [ref=e47] [cursor=pointer]
+        - button "Stats" [ref=e48] [cursor=pointer]
+        - button "User Details" [ref=e49] [cursor=pointer]
+        - button "JSON" [ref=e50] [cursor=pointer]

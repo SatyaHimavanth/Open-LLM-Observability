@@ -515,7 +515,7 @@ function buildFlowSteps(spans) {
   const steps = [];
 
   sorted.forEach(s => {
-    if (consumed.has(s.span_id) || isEndEvent(s.event)) return;
+    if (consumed.has(s.span_id)) return;
 
     if (s.event === "agent_stream_start" || s.event === "agent_invoke_start") {
       const end = findEndSpan(s, byParent);
@@ -531,10 +531,22 @@ function buildFlowSteps(spans) {
       return;
     }
 
+    if (s.event === "llm_end" || s.event === "llm_error") {
+      steps.push({kind:"llm", start:s, end:s});
+      consumed.add(s.span_id);
+      return;
+    }
+
     if (s.event === "tool_start") {
-      const end = findEndSpan(s, byParent);
+      const end = findEndSpan(s, byParent) || findSiblingToolEnd(s, sorted);
       if (end) consumed.add(end.span_id);
       steps.push({kind:"tool", start:s, end});
+      return;
+    }
+
+    if (s.event === "tool_end" || s.event === "tool_error") {
+      steps.push({kind:"tool", start:s, end:s});
+      consumed.add(s.span_id);
       return;
     }
 
@@ -546,6 +558,16 @@ function buildFlowSteps(spans) {
 
 function isEndEvent(event) { return event?.includes("_end") || event?.includes("_error") || event === "llm_error" || event === "tool_error"; }
 function findEndSpan(start, byParent) { return (byParent[start.span_id] || []).filter(s => isEndEvent(s.event)).sort((a,b) => (a.ts_start||0) - (b.ts_start||0))[0]; }
+function findSiblingToolEnd(start, spans) {
+  return spans
+    .filter(s =>
+      (s.event === "tool_end" || s.event === "tool_error") &&
+      s.parent_span === start.parent_span &&
+      s.tool_name === start.tool_name &&
+      (s.ts_start || 0) >= (start.ts_start || 0)
+    )
+    .sort((a,b) => (a.ts_start||0) - (b.ts_start||0))[0];
+}
 
 function renderFlowStep(step) {
   const s = step.start;
@@ -590,28 +612,32 @@ function renderFlowDetail(step) {
 }
 
 function renderAgentDetail(step) {
-  const input = step.start.meta?.input?.messages || [];
+  const input = normalizeMessages(step.start.meta?.input?.messages || step.start.messages || []);
+  const agents = step.start.meta?.agents || [];
+  const user = step.start.user || {};
   return detailBox(`
     <div class="kv-grid">
       <div class="kv-key">Status</div><div class="kv-val">${step.end ? "Completed" : "Running"}</div>
       <div class="kv-key">Duration</div><div class="kv-val">${fmtMs(step.end?.latency_ms)}</div>
+      ${userLabel(user) ? `<div class="kv-key">User</div><div class="kv-val">${esc(userLabel(user))}</div>` : ""}
     </div>
     ${input.length ? `<div class="section-title">User Input</div>${input.map(renderMessage).join("")}` : ""}
+    ${agents.length ? `<div class="section-title">Agents & Tools</div>${renderAgents(agents)}` : ""}
   `);
 }
 
 function renderLlmDetail(step) {
   const start = step.start;
   const end = step.end;
-  const messages = (start.messages || []).flatMap(m => Array.isArray(m) ? m : [m]);
+  const messages = normalizeMessages(start.messages || []);
   const calls = toolCallsFromSpan(end);
-  const responseText = (end?.response?.generations || []).flat().map(g => g.text || "").filter(Boolean).join("\n\n");
+  const responseText = llmResponseText(end);
 
   return detailBox(`
     ${messages.length ? `<div class="section-title">Prompt</div>${messages.map(renderMessage).join("")}` : ""}
     ${calls.length ? `<div class="section-title">Tool Calls Requested</div><pre class="msg">${esc(JSON.stringify(calls, null, 2))}</pre>` : ""}
     ${responseText ? `<div class="section-title">Model Response</div><pre class="msg">${esc(responseText)}</pre>` : ""}
-    ${end?.tokens ? `<div class="section-title">Usage</div><div class="kv-grid"><div class="kv-key">Total</div><div class="kv-val">${fmtNum(end.tokens.total)}</div></div>` : ""}
+    ${end?.tokens ? `<div class="section-title">Usage</div>${renderUsage(end.tokens)}` : ""}
   `);
 }
 
@@ -641,6 +667,12 @@ function renderSpanSummary(start, end) {
 
 function detailBox(inner) { return `<div class="span-detail">${inner}</div>`; }
 function selectSpan(sid, e) { e.stopPropagation(); activeSpan = activeSpan === sid ? null : sid; renderTab(spanCache[activeTrace]); }
+function normalizeMessages(messages) {
+  if (!messages) return [];
+  if (typeof messages === "string") return [{role:"user", content:messages}];
+  if (!Array.isArray(messages)) return [messages];
+  return messages.flatMap(m => Array.isArray(m) ? m : [m]);
+}
 function renderMessage(m) {
   const role = m.role || m.type || "message";
   let content = typeof m === "string" ? m : m.content;
@@ -651,7 +683,36 @@ function renderMessage(m) {
   }
   return `<div class="flow-message"><div class="flow-message-role">${esc(role)}</div><pre style="white-space: pre-wrap; font-family: inherit; margin: 0;">${esc(String(content || ""))}</pre></div>`;
 }
-function toolCallsFromSpan(span) { return (span?.response?.generations || []).flat().flatMap(g => g.tool_calls || []); }
+function toolCallsFromSpan(span) {
+  const direct = span?.response?.tool_calls || [];
+  const generated = (span?.response?.generations || []).flat().flatMap(g => g.tool_calls || []);
+  return [...direct, ...generated];
+}
+function llmResponseText(span) {
+  if (span?.response?.content) return span.response.content;
+  return (span?.response?.generations || []).flat().map(g => g.text || "").filter(Boolean).join("\n\n");
+}
+function renderUsage(tokens) {
+  return `<div class="kv-grid">
+    ${tokens.prompt !== undefined ? `<div class="kv-key">Prompt</div><div class="kv-val">${fmtNum(tokens.prompt)}</div>` : ""}
+    ${tokens.completion !== undefined ? `<div class="kv-key">Completion</div><div class="kv-val">${fmtNum(tokens.completion)}</div>` : ""}
+    ${tokens.reasoning !== undefined ? `<div class="kv-key">Reasoning</div><div class="kv-val">${fmtNum(tokens.reasoning)}</div>` : ""}
+    ${tokens.tool !== undefined ? `<div class="kv-key">Tool</div><div class="kv-val">${fmtNum(tokens.tool)}</div>` : ""}
+    ${tokens.cached !== undefined ? `<div class="kv-key">Cached</div><div class="kv-val">${fmtNum(tokens.cached)}</div>` : ""}
+    ${tokens.total !== undefined ? `<div class="kv-key">Total</div><div class="kv-val">${fmtNum(tokens.total)}</div>` : ""}
+  </div>`;
+}
+function renderAgents(agents) {
+  return `<div class="tool-list">${agents.map(agent => `
+    <div class="tool-card">
+      <div class="tool-card-title">${esc(agent.name || "agent")}${agent.model ? ` · ${esc(agent.model)}` : ""}</div>
+      ${agent.description ? `<div>${esc(agent.description)}</div>` : ""}
+      ${agent.instruction ? `<pre class="msg" style="margin-top:8px">${esc(agent.instruction)}</pre>` : ""}
+      ${(agent.tools || []).length ? `<div class="section-title">Tools</div>${agent.tools.map(tool => `<div class="tool-card-title">${esc(tool.name)}${tool.description ? ` - ${esc(tool.description.trim())}` : ""}</div>`).join("")}` : ""}
+    </div>
+  `).join("")}</div>`;
+}
+function userLabel(user) { return user?.email || user?.name || user?.id || ""; }
 
 function renderStats(data) {
   const t = traces[activeTrace];
@@ -688,6 +749,8 @@ function renderUserDetails(data) {
         <div class="kv-key">Name</div><div class="kv-val">${esc(name)}</div>
         <div class="kv-key">Email</div><div class="kv-val">${esc(email)}</div>
         <div class="kv-key">ID</div><div class="kv-val">${esc(id)}</div>
+        ${u.account ? `<div class="kv-key">Account</div><div class="kv-val">${esc(u.account)}</div>` : ""}
+        ${u.source ? `<div class="kv-key">Source</div><div class="kv-val">${esc(u.source)}</div>` : ""}
       </div>
       ${u.role ? `<div class="kv-grid" style="margin-top:8px"><div class="kv-key">Role</div><div class="kv-val">${esc(u.role)}</div></div>` : ""}
     </div>
