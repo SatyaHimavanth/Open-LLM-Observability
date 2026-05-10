@@ -52,6 +52,7 @@ def _patch_langchain():
             self._t: Dict[str, float] = {}
             self._ctx: Dict[str, tuple] = {}
             self._obs_ctx: Dict[str, tuple] = {}
+            self._models: Dict[str, Optional[str]] = {}
 
         def _start_context(
             self,
@@ -78,6 +79,8 @@ def _patch_langchain():
             trace_id, parent_span = self._start_context(
                 run_id, parent_run_id, _obs_context_from_callback_kwargs(kw)
             )
+            model = _model_name(serialized, kw)
+            self._models[str(run_id)] = model
             emit(Span(
                 span_id=str(run_id),
                 trace_id=trace_id,
@@ -85,15 +88,17 @@ def _patch_langchain():
                 event="llm_start",
                 resource="llm",
                 framework="langchain",
-                model=_model_name(serialized),
+                model=model,
                 messages=prompts,
-                meta=_llm_start_meta(kw),
+                meta=_llm_start_meta(kw, serialized),
             ))
 
         def on_chat_model_start(self, serialized, messages, *, run_id, parent_run_id=None, **kw):
             trace_id, parent_span = self._start_context(
                 run_id, parent_run_id, _obs_context_from_callback_kwargs(kw)
             )
+            model = _model_name(serialized, kw)
+            self._models[str(run_id)] = model
             emit(Span(
                 span_id=str(run_id),
                 trace_id=trace_id,
@@ -101,9 +106,9 @@ def _patch_langchain():
                 event="llm_start",
                 resource="llm",
                 framework="langchain",
-                model=_model_name(serialized),
+                model=model,
                 messages=[[_message_to_dict(m) for m in batch] for batch in messages],
-                meta=_llm_start_meta(kw),
+                meta=_llm_start_meta(kw, serialized),
             ))
 
         def on_llm_end(self, response: LLMResult, *, run_id, parent_run_id=None, **kw):
@@ -134,6 +139,7 @@ def _patch_langchain():
                 event="llm_end",
                 resource="llm",
                 framework="langchain",
+                model=self._models.get(str(run_id)),
                 latency_ms=latency,
                 tokens=_token_usage(usage),
                 response={"generations": [
@@ -141,6 +147,7 @@ def _patch_langchain():
                 ]},
                 meta={"capture_via": "langchain_callback"},
             ))
+            self._models.pop(str(run_id), None)
             self._restore_finished_context(run_id)
 
         def on_llm_error(self, error, *, run_id, parent_run_id=None, **kw):
@@ -152,9 +159,11 @@ def _patch_langchain():
                 event="llm_error",
                 resource="llm",
                 framework="langchain",
+                model=self._models.get(str(run_id)),
                 error=str(error),
                 meta={"capture_via": "langchain_callback"},
             ))
+            self._models.pop(str(run_id), None)
             self._restore_finished_context(run_id)
 
         def on_tool_start(self, serialized, input_str, *, run_id, parent_run_id=None, **kw):
@@ -630,11 +639,33 @@ def _agent_error(span_id, trace_id, error):
     ))
 
 
-def _model_name(serialized: dict) -> Optional[str]:
+def _model_name(serialized: dict, callback_kwargs: Optional[dict] = None) -> Optional[str]:
+    callback_kwargs = callback_kwargs or {}
+    invocation_params = callback_kwargs.get("invocation_params") or {}
+    options = callback_kwargs.get("options") or {}
+    for params in (invocation_params, options):
+        model = (
+            params.get("model")
+            or params.get("model_name")
+            or params.get("ls_model_name")
+            or params.get("deployment_name")
+        )
+        if model:
+            return str(model)
     if not isinstance(serialized, dict):
         return None
     kwargs = serialized.get("kwargs", {})
-    return kwargs.get("model_name") or kwargs.get("model") or serialized.get("name")
+    return kwargs.get("model_name") or kwargs.get("model") or kwargs.get("deployment_name")
+
+
+def _model_identity(serialized: dict) -> dict:
+    if not isinstance(serialized, dict):
+        return {}
+    identity = {
+        "model_class": serialized.get("name") or (serialized.get("id") or [""])[-1],
+        "model_module": ".".join((serialized.get("id") or [])[:-1]),
+    }
+    return {key: value for key, value in identity.items() if value}
 
 
 def _serialized_name(serialized: dict) -> Optional[str]:
@@ -669,8 +700,9 @@ def _generation_to_dict(generation):
     return result
 
 
-def _llm_start_meta(callback_kwargs: dict) -> dict:
+def _llm_start_meta(callback_kwargs: dict, serialized: Optional[dict] = None) -> dict:
     meta = {"capture_via": "langchain_callback"}
+    identity = _model_identity(serialized or {})
     invocation_params = _compact_invocation_params(
         callback_kwargs.get("invocation_params") or {}
     )
@@ -680,6 +712,8 @@ def _llm_start_meta(callback_kwargs: dict) -> dict:
         meta["invocation_params"] = invocation_params
     if options:
         meta["options"] = options
+    if identity:
+        meta.update(identity)
     if invocation_params.get("tools"):
         meta["tools"] = invocation_params["tools"]
     elif options.get("tools"):
@@ -691,6 +725,7 @@ def _compact_invocation_params(params: dict) -> dict:
     keep = {
         "model",
         "model_name",
+        "ls_model_name",
         "deployment_name",
         "temperature",
         "max_tokens",

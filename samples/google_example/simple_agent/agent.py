@@ -1,5 +1,3 @@
-import universal_agent_obs
-
 from google.adk.agents.llm_agent import Agent
 
 

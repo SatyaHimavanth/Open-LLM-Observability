@@ -15,12 +15,12 @@ from ..core import (
     emit,
     _current_span,
     _current_trace,
-    _current_user,
     _restore_context,
     _restore_trace,
     _set_context,
     _set_trace,
 )
+from ..google import context_from_callbacks
 
 _INSTALLED = False
 
@@ -47,6 +47,7 @@ def _patch_adk():
 
     async def _patched_run_async(self, *args, **kwargs):
         """Wrap Runner.run_async to emit agent lifecycle spans."""
+        callbacks = kwargs.pop("callbacks", None) or kwargs.pop("obs_callbacks", None) or []
         agent_instance = getattr(self, "agent", None)
         agent_label = getattr(agent_instance, "name", None) or type(agent_instance).__name__ if agent_instance else "ADKAgent"
         model_by_agent = _agent_model_map(agent_instance)
@@ -56,7 +57,10 @@ def _patch_adk():
         trace_id = _current_trace() or span_id
         parent_span = _current_span()
         user_id = kwargs.get("user_id")
-        previous_context = _set_context(user=_current_user() or ({"id": user_id} if user_id else None))
+        obs_context = context_from_callbacks(callbacks)
+        if "user" not in obs_context and user_id:
+            obs_context["user"] = {"id": user_id}
+        previous_context = _set_context(**obs_context)
         previous = _set_trace(trace_id, span_id)
         t0 = time.perf_counter()
         input_message = _safe_message(kwargs.get("new_message"))

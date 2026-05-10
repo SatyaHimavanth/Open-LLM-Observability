@@ -76,7 +76,7 @@ async def ws_endpoint(websocket: WebSocket, user_id: Optional[str] = None):
     with get_session() as session:
         await websocket.send_json({
             "type": "init",
-            "traces": _list_trace_summaries(session, user_id=user_id),
+            "traces": [],
             "projects": _project_summaries(session, user_id=user_id),
         })
     try:
@@ -165,19 +165,26 @@ async def ingest(request: Request, payload: dict):
 
 @app.get("/traces")
 def list_traces(
-    limit: int = 100,
+    page: int = 1,
+    per_page: int = 50,
+    limit: Optional[int] = None,
     framework: Optional[str] = None,
     project: Optional[str] = None,
+    q: Optional[str] = None,
     user_email: Optional[str] = None,
     user_id: Optional[str] = None,
     include_archived: bool = False,
 ):
+    page = max(page, 1)
+    per_page = min(max(limit or per_page, 1), 100)
     with get_session() as session:
-        return _list_trace_summaries(
+        return _list_trace_page(
             session,
-            limit=limit,
+            page=page,
+            per_page=per_page,
             framework=framework,
             project=project,
+            q=q,
             user_email=user_email,
             user_id=user_id,
             include_archived=include_archived,
@@ -261,7 +268,7 @@ def stats():
     return {
         "traces": len(summaries),
         "spans": sum(s["span_count"] for s in summaries),
-        "total_cost": round(sum(s["total_cost"] for s in summaries), 4),
+        "total_cost": round(sum(s["total_cost"] for s in summaries), 8),
         "frameworks": sorted({s["framework"] for s in summaries if s.get("framework")}),
         "projects": sorted({s["project_name"] for s in summaries if s.get("project_name")}),
         "ws_clients": len(_ws_clients),
@@ -319,25 +326,50 @@ def _enrich(span: dict) -> dict:
     span["received_at"] = time.time()
 
     tokens = span.get("tokens") or {}
-    model = (span.get("model") or "").lower()
+    model = span.get("model") or _model_from_meta(span.get("meta") or "")
     cost = _estimate_cost(
         model,
         tokens.get("prompt") or 0,
         tokens.get("completion") or 0,
     )
-    if cost:
+    if cost is not None:
         span["cost_usd"] = cost
 
     return span
 
 
+def _model_from_meta(meta: dict) -> str:
+    if not isinstance(meta, dict):
+        return ""
+    for params in (meta.get("invocation_params") or {}, meta.get("options") or {}):
+        if not isinstance(params, dict):
+            continue
+        model = (
+            params.get("model")
+            or params.get("model_name")
+            or params.get("ls_model_name")
+            or params.get("deployment_name")
+        )
+        if model:
+            return str(model)
+    return ""
+
+
 def _estimate_cost(model: str, prompt: int, completion: int) -> Optional[float]:
+    litellm_cost = _estimate_cost_litellm(model, prompt, completion)
+    if litellm_cost is not None:
+        return litellm_cost
+
+    model = (model or "").lower()
     prices = {
+        "gpt-4o-mini": (0.15, 0.60),
+        "gpt-4.1-nano": (0.10, 0.40),
+        "gpt-4.1-mini": (0.40, 1.60),
+        "gpt-4.1": (2.00, 8.00),
         "claude-opus": (15.0, 75.0),
         "claude-sonnet": (3.0, 15.0),
         "claude-haiku": (0.25, 1.25),
         "gpt-4o": (2.5, 10.0),
-        "gpt-4o-mini": (0.15, 0.60),
         "gpt-4-turbo": (10.0, 30.0),
         "gpt-3.5": (0.5, 1.5),
         "gemini-1.5-pro": (3.5, 10.5),
@@ -346,13 +378,29 @@ def _estimate_cost(model: str, prompt: int, completion: int) -> Optional[float]:
     }
     for key, (inp, out) in prices.items():
         if key in model:
-            return round((prompt * inp + completion * out) / 1_000_000, 6)
+            return round((prompt * inp + completion * out) / 1_000_000, 8)
     return None
+
+
+def _estimate_cost_litellm(model: str, prompt: int, completion: int) -> Optional[float]:
+    if not model or not (prompt or completion):
+        return None
+    try:
+        from litellm import completion_cost
+
+        return round(float(completion_cost(
+            model=model,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+        )), 8)
+    except Exception:
+        return None
 
 
 def _list_trace_summaries(
     session,
     limit: int = 100,
+    offset: int = 0,
     framework: Optional[str] = None,
     project: Optional[str] = None,
     user_email: Optional[str] = None,
@@ -364,6 +412,7 @@ def _list_trace_summaries(
         for tid in list_trace_ids(
             session,
             limit=limit,
+            offset=offset,
             framework=framework,
             project=project,
             user_email=user_email,
@@ -372,6 +421,75 @@ def _list_trace_summaries(
         )
     ]
     return summaries
+
+
+def _list_trace_page(
+    session,
+    page: int = 1,
+    per_page: int = 50,
+    framework: Optional[str] = None,
+    project: Optional[str] = None,
+    q: Optional[str] = None,
+    user_email: Optional[str] = None,
+    user_id: Optional[str] = None,
+    include_archived: bool = False,
+) -> dict:
+    # Search and aggregate stats are summary-level concepts, so this keeps
+    # frontend payloads paged while still reporting totals across the filter.
+    all_ids = list_trace_ids(
+        session,
+        limit=100_000,
+        framework=framework,
+        project=project,
+        user_email=user_email,
+        user_id=user_id,
+        include_archived=include_archived,
+    )
+    summaries = [_trace_summary(session, tid, include_archived=include_archived) for tid in all_ids]
+    if q:
+        needle = q.lower()
+        summaries = [summary for summary in summaries if _summary_matches(summary, needle)]
+
+    total = len(summaries)
+    offset = (page - 1) * per_page
+    items = summaries[offset:offset + per_page]
+    return {
+        "items": items,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": max(1, (total + per_page - 1) // per_page),
+        "stats": _trace_collection_stats(summaries),
+    }
+
+
+def _summary_matches(summary: dict, needle: str) -> bool:
+    user = summary.get("user") or {}
+    haystack = " ".join([
+        str(summary.get("trace_id") or ""),
+        str(summary.get("framework") or ""),
+        str(summary.get("project_name") or ""),
+        " ".join(summary.get("agents") or []),
+        " ".join(summary.get("models") or []),
+        " ".join(summary.get("tags") or []),
+        str(user.get("id") or ""),
+        str(user.get("name") or ""),
+        str(user.get("email") or ""),
+    ]).lower()
+    return needle in haystack
+
+
+def _trace_collection_stats(summaries: list[dict]) -> dict:
+    total = len(summaries)
+    done = sum(1 for s in summaries if s.get("status") == "done")
+    errors = sum(1 for s in summaries if s.get("status") == "error")
+    return {
+        "total_cost": sum(s.get("total_cost") or 0 for s in summaries),
+        "success_count": done,
+        "error_count": errors,
+        "success_rate": round(done / total, 4) if total else 0,
+        "error_rate": round(errors / total, 4) if total else 0,
+    }
 
 
 def _project_summaries(session, user_id: Optional[str] = None, include_archived: bool = False) -> list[dict]:

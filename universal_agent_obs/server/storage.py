@@ -110,6 +110,7 @@ def list_span_payloads(
 def list_trace_ids(
     session: Session,
     limit: int = 100,
+    offset: int = 0,
     framework: Optional[str] = None,
     project: Optional[str] = None,
     user_email: Optional[str] = None,
@@ -130,6 +131,7 @@ def list_trace_ids(
     rows = session.execute(
         stmt.group_by(SpanRecord.trace_id)
         .order_by(func.max(SpanRecord.received_at).desc())
+        .offset(offset)
         .limit(limit)
     ).all()
     return [r[0] for r in rows]

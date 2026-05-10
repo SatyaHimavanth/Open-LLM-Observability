@@ -17,19 +17,13 @@ PROJECT_NAME = os.getenv("AGENT_OBS_PROJECT") or os.getenv("LANGSMITH_PROJECT") 
 CLIENT_ID   = os.getenv("AGENT_OBS_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("AGENT_OBS_CLIENT_SECRET", "")
 
-DEFAULT_USER = {
-    key: value
-    for key, value in {
-        "id": os.getenv("AGENT_OBS_USER_ID"),
-        "name": os.getenv("AGENT_OBS_USER_NAME"),
-        "email": os.getenv("AGENT_OBS_USER_EMAIL"),
-        "account": os.getenv("AGENT_OBS_USER_ACCOUNT"),
-        "role": os.getenv("AGENT_OBS_USER_ROLE"),
-    }.items()
-    if value
-}
+def _client_credentials() -> tuple[str, str]:
+    return (
+        os.getenv("AGENT_OBS_CLIENT_ID", CLIENT_ID),
+        os.getenv("AGENT_OBS_CLIENT_SECRET", CLIENT_SECRET),
+    )
 
-if ENABLED and not (CLIENT_ID and CLIENT_SECRET):
+if ENABLED and not all(_client_credentials()):
     print("\n[WARNING] AGENT_OBS_CLIENT_ID and AGENT_OBS_CLIENT_SECRET are not set.")
     print("[WARNING] Traces will not be loaded into your dashboard. Please log in to your Agent Observability dashboard to get your credentials.\n")
 
@@ -111,7 +105,7 @@ def _current_project() -> str:
     return _task_attr("_obs_project_name") or getattr(_local, "project_name", None) or PROJECT_NAME
 
 def _current_user() -> Optional[dict]:
-    return _task_attr("_obs_user") or getattr(_local, "user", None) or DEFAULT_USER or None
+    return _task_attr("_obs_user") or getattr(_local, "user", None)
 
 def _current_tags() -> Optional[list]:
     tags = _task_attr("_obs_tags") or getattr(_local, "tags", None)
@@ -275,9 +269,10 @@ def _post_span(span_dict: dict):
 
     data = json.dumps(span_dict).encode()
     headers = {"Content-Type": "application/json"}
-    if CLIENT_ID and CLIENT_SECRET:
-        headers["x-client-id"] = CLIENT_ID
-        headers["x-client-secret"] = CLIENT_SECRET
+    client_id, client_secret = _client_credentials()
+    if client_id and client_secret:
+        headers["x-client-id"] = client_id
+        headers["x-client-secret"] = client_secret
 
     req  = urllib.request.Request(
         f"{SERVER_URL}/ingest",

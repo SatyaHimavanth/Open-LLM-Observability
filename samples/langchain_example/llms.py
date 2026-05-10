@@ -10,16 +10,16 @@ load_dotenv()
 
 
 def get_chat_model() -> BaseChatModel:
-    try:
-        from langchain_ollama import ChatOllama
-        return ChatOllama(
-                    model="qwen3.5:2b",
-                    model_kwargs={
-                    "reasoning_effort": "low"
-                }
-            )
-    except Exception as e:
-        print(f"Error: {e}")
+    # try:
+    #     from langchain_ollama import ChatOllama
+    #     return ChatOllama(
+    #                 model="qwen3.5:2b",
+    #                 model_kwargs={
+    #                 "reasoning_effort": "low"
+    #             }
+    #         )
+    # except Exception as e:
+    #     print(f"Error: {e}")
 
 
     api_key = os.getenv("AZURE_OPENAI_API_KEY")

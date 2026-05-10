@@ -10,9 +10,12 @@ from ..core import (
     emit,
     get_or_new_trace,
     _current_span,
+    _restore_context,
     _restore_trace,
+    _set_context,
     _set_trace,
 )
+from ..google import context_from_callbacks
 
 _INSTALLED = False
 
@@ -45,11 +48,13 @@ def _patch_sync_models(Models):
     orig_generate_content_stream = Models.generate_content_stream
 
     def generate_content(self, *args, **kwargs):
+        callbacks = kwargs.pop("callbacks", None) or kwargs.pop("obs_callbacks", None) or []
         if _current_span():
             return orig_generate_content(self, *args, **kwargs)
 
         model = kwargs.get("model")
         contents = kwargs.get("contents")
+        previous_context = _set_context(**context_from_callbacks(callbacks))
         start_span_id, trace_id, t0 = _emit_start(model, contents, "google_genai_sdk")
         previous = _set_trace(trace_id, start_span_id)
         try:
@@ -61,14 +66,17 @@ def _patch_sync_models(Models):
             raise
         finally:
             _restore_trace(previous)
+            _restore_context(previous_context)
 
     def generate_content_stream(self, *args, **kwargs):
+        callbacks = kwargs.pop("callbacks", None) or kwargs.pop("obs_callbacks", None) or []
         if _current_span():
             yield from orig_generate_content_stream(self, *args, **kwargs)
             return
 
         model = kwargs.get("model")
         contents = kwargs.get("contents")
+        previous_context = _set_context(**context_from_callbacks(callbacks))
         start_span_id, trace_id, t0 = _emit_start(model, contents, "google_genai_sdk_stream")
         previous = _set_trace(trace_id, start_span_id)
         chunks = []
@@ -82,6 +90,7 @@ def _patch_sync_models(Models):
             raise
         finally:
             _restore_trace(previous)
+            _restore_context(previous_context)
 
     generate_content._agent_obs_patched = True
     generate_content_stream._agent_obs_patched = True
@@ -97,11 +106,13 @@ def _patch_async_models(AsyncModels):
     orig_generate_content_stream = AsyncModels.generate_content_stream
 
     async def generate_content(self, *args, **kwargs):
+        callbacks = kwargs.pop("callbacks", None) or kwargs.pop("obs_callbacks", None) or []
         if _current_span():
             return await orig_generate_content(self, *args, **kwargs)
 
         model = kwargs.get("model")
         contents = kwargs.get("contents")
+        previous_context = _set_context(**context_from_callbacks(callbacks))
         start_span_id, trace_id, t0 = _emit_start(model, contents, "google_genai_sdk")
         previous = _set_trace(trace_id, start_span_id)
         try:
@@ -113,8 +124,10 @@ def _patch_async_models(AsyncModels):
             raise
         finally:
             _restore_trace(previous)
+            _restore_context(previous_context)
 
     async def generate_content_stream(self, *args, **kwargs):
+        callbacks = kwargs.pop("callbacks", None) or kwargs.pop("obs_callbacks", None) or []
         if _current_span():
             async for chunk in orig_generate_content_stream(self, *args, **kwargs):
                 yield chunk
@@ -122,6 +135,7 @@ def _patch_async_models(AsyncModels):
 
         model = kwargs.get("model")
         contents = kwargs.get("contents")
+        previous_context = _set_context(**context_from_callbacks(callbacks))
         start_span_id, trace_id, t0 = _emit_start(model, contents, "google_genai_sdk_stream")
         previous = _set_trace(trace_id, start_span_id)
         chunks = []
@@ -135,6 +149,7 @@ def _patch_async_models(AsyncModels):
             raise
         finally:
             _restore_trace(previous)
+            _restore_context(previous_context)
 
     generate_content._agent_obs_patched = True
     generate_content_stream._agent_obs_patched = True

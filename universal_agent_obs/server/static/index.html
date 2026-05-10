@@ -55,6 +55,15 @@
   /* Trace List */
   .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border); display: inline-block; }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .trace-summary-cards { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .trace-summary-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; min-width: 180px; }
+  .trace-summary-card .label { color: var(--text-muted); font-size: 10px; text-transform: uppercase; font-weight: 600; margin-bottom: 6px; }
+  .trace-summary-card .value { color: var(--text); font-size: 18px; font-weight: 600; }
+  .trace-summary-card .hint { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
+  .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
+  .page-btn { min-width: 32px; padding: 6px 9px; }
+  .page-btn.active { background: var(--accent); border-color: var(--accent); color: #000; }
+  .page-ellipsis { color: var(--text-muted); padding: 0 4px; }
 
   /* Detail Drawer */
   #detail-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 60%; min-width: 500px; background: var(--bg2); border-left: 1px solid var(--border); display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: -4px 0 24px rgba(0,0,0,0.5); z-index: 100; }
@@ -89,7 +98,9 @@
   .span-toggle { color: var(--text-muted); width: 12px; cursor: pointer; text-align: center; font-size: 10px; }
   .span-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
   .span-name { flex: 1; font-size: 12px; color: var(--text); }
-  .span-model { font-size: 11px; color: var(--text-muted); }
+  .span-model { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 11px; color: var(--text-muted); min-width: 150px; }
+  .span-model-name { color: var(--text); font-weight: 500; }
+  .span-model-impl { color: var(--text-muted); font-size: 10px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .span-tokens { font-size: 11px; color: var(--text-muted); }
   .span-lat { font-size: 11px; font-weight: 500; }
   .span-children { margin-left: 18px; margin-top: 2px; border-left: 1px solid var(--border); padding-left: 8px; }
@@ -177,7 +188,19 @@
 
     <div id="view-traces" style="display:none;">
       <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
-        <input type="text" id="search" class="input" style="width:300px" placeholder="Search traces..." oninput="renderTraces()">
+        <input type="text" id="search" class="input" style="width:300px" placeholder="Search traces..." oninput="onTraceSearch()">
+      </div>
+      <div class="trace-summary-cards">
+        <div class="trace-summary-card">
+          <div class="label">Total Cost</div>
+          <div class="value" id="trace-total-cost">$0</div>
+          <div class="hint" id="trace-total-count">0 traces</div>
+        </div>
+        <div class="trace-summary-card">
+          <div class="label">Success / Error</div>
+          <div class="value" id="trace-rates">0% / 0%</div>
+          <div class="hint" id="trace-rate-counts">0 success, 0 errors</div>
+        </div>
       </div>
       <table class="data-table" id="traces-table">
         <thead>
@@ -195,6 +218,7 @@
         </thead>
         <tbody></tbody>
       </table>
+      <div class="pagination" id="trace-pagination"></div>
     </div>
 
     <div id="view-settings" style="display:none;">
@@ -260,6 +284,12 @@ let activeSpan = null;
 let activeTab = "tree";
 let showRawSpanDetails = false;
 let ws = null;
+let tracePage = 1;
+let tracePerPage = 50;
+let traceTotalPages = 1;
+let traceTotal = 0;
+let traceStats = {total_cost:0, success_rate:0, error_rate:0, success_count:0, error_count:0};
+let searchTimer = null;
 
 // Initialization
 window.onload = () => {
@@ -337,7 +367,7 @@ function navTo(view) {
     fetchProjects();
   } else if (view === 'traces') {
     document.getElementById('breadcrumbs').innerHTML = `<span style="cursor:pointer;color:var(--blue)" onclick="navTo('projects')">Projects</span> <span>/</span> <span class="active">${selectedProject}</span>`;
-    renderTraces();
+    fetchTraces();
   } else if (view === 'settings') {
     document.getElementById('breadcrumbs').innerHTML = `<span class="active">Settings</span>`;
   }
@@ -345,6 +375,9 @@ function navTo(view) {
 
 function openProject(name) {
   selectedProject = name;
+  tracePage = 1;
+  traces = {};
+  document.getElementById("search").value = "";
   navTo('traces');
 }
 
@@ -372,15 +405,13 @@ function connect() {
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
     if (msg.type === "init") {
-      msg.traces.forEach(t => { traces[t.trace_id] = t; });
       (msg.projects || []).forEach(p => { projects[p.name] = p; });
       if (currentView === 'projects') renderProjects();
-      if (currentView === 'traces') renderTraces();
+      if (currentView === 'traces') fetchTraces();
     } else if (msg.type === "span") {
-      traces[msg.summary.trace_id] = msg.summary;
       fetchProjects();
       delete spanCache[msg.summary.trace_id];
-      if (currentView === 'traces') renderTraces();
+      if (currentView === 'traces') fetchTraces();
       if (activeTrace === msg.summary.trace_id) loadTrace(activeTrace);
     }
   };
@@ -393,7 +424,7 @@ function renderProjects() {
       <td><span style="font-weight:500;color:var(--text)">${esc(p.name)}</span></td>
       <td>${p.trace_count}</td>
       <td>${(p.error_rate * 100).toFixed(1)}%</td>
-      <td>$${(p.total_cost||0).toFixed(4)}</td>
+      <td>${fmtCost(p.total_cost)}</td>
       <td>${p.most_recent_run ? new Date(p.most_recent_run * 1000).toLocaleString() : '-'}</td>
       <td style="text-align:right">
         <button class="btn" style="padding:4px 8px;color:var(--red);border-color:var(--red)" onclick="deleteProject('${p.name}', event)">Delete</button>
@@ -402,22 +433,45 @@ function renderProjects() {
   `).join('');
 }
 
+async function fetchTraces() {
+  if (currentView !== 'traces') return;
+  const params = new URLSearchParams({
+    user_id: currentUser.id,
+    project: selectedProject || "default",
+    page: String(tracePage),
+    per_page: String(tracePerPage)
+  });
+  const q = (document.getElementById("search").value || "").trim();
+  if (q) params.set("q", q);
+  const res = await fetch(`/traces?${params.toString()}`);
+  const data = await res.json();
+  traces = {};
+  (data.items || []).forEach(t => { traces[t.trace_id] = t; });
+  tracePage = data.page || 1;
+  traceTotalPages = data.total_pages || 1;
+  traceTotal = data.total || 0;
+  traceStats = data.stats || traceStats;
+  renderTraces();
+}
+
+function onTraceSearch() {
+  tracePage = 1;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(fetchTraces, 200);
+}
+
 function renderTraces() {
   if (currentView !== 'traces') return;
-  const q = (document.getElementById("search").value || "").toLowerCase();
-  const all = Object.values(traces).filter(t => (t.project_name || "default") === selectedProject).sort((a,b) => b.started_at - a.started_at);
-  const filtered = all.filter(t => {
-    if (!q) return true;
-    return (t.trace_id + t.framework + JSON.stringify(t.user || {}) + (t.tags || []).join("") + (t.agents||[]).join("") + (t.models||[]).join("")).toLowerCase().includes(q);
-  });
+  const rows = Object.values(traces).sort((a,b) => b.started_at - a.started_at);
+  renderTraceSummary();
   
-  document.querySelector('#traces-table tbody').innerHTML = filtered.map(t => `
+  document.querySelector('#traces-table tbody').innerHTML = rows.map(t => `
     <tr onclick="loadTrace('${t.trace_id}')">
       <td><div class="status-dot" style="background:${statusColor(t.status)}"></div>${t.status}</td>
       <td style="font-family:var(--font-mono);font-size:12px;">${t.trace_id.split("-")[0]}</td>
       <td><span class="badge">${t.framework}</span></td>
       <td><span style="font-size:12px;color:var(--text-muted)">${getUserName(t)}</span></td>
-      <td>$${(t.total_cost||0).toFixed(4)}</td>
+      <td>${fmtCost(t.total_cost)}</td>
       <td title="Input: ${fmtNum(t.total_tokens?.prompt)} | Reasoning: ${fmtNum(t.total_tokens?.reasoning)} | Output: ${fmtNum(t.total_tokens?.completion)}">${fmtNum(t.total_tokens?.total)}</td>
       <td>${fmtMs(t.duration_ms)}</td>
       <td>${new Date(t.started_at * 1000).toLocaleTimeString()}</td>
@@ -426,6 +480,42 @@ function renderTraces() {
       </td>
     </tr>
   `).join('');
+  renderPagination();
+}
+
+function renderTraceSummary() {
+  document.getElementById("trace-total-cost").textContent = fmtCost(traceStats.total_cost);
+  document.getElementById("trace-total-count").textContent = `${fmtNum(traceTotal)} trace${traceTotal === 1 ? "" : "s"}`;
+  document.getElementById("trace-rates").textContent = `${fmtPct(traceStats.success_rate)} / ${fmtPct(traceStats.error_rate)}`;
+  document.getElementById("trace-rate-counts").textContent = `${fmtNum(traceStats.success_count)} success, ${fmtNum(traceStats.error_count)} errors`;
+}
+
+function renderPagination() {
+  const el = document.getElementById("trace-pagination");
+  const pages = paginationPages(tracePage, traceTotalPages);
+  el.innerHTML = `
+    <button class="btn page-btn" ${tracePage <= 1 ? "disabled" : ""} onclick="goTracePage(${tracePage - 1})">Prev</button>
+    ${pages.map(p => p === "..." ? `<span class="page-ellipsis">...</span>` : `<button class="btn page-btn ${p === tracePage ? "active" : ""}" onclick="goTracePage(${p})">${p}</button>`).join("")}
+    <button class="btn page-btn" ${tracePage >= traceTotalPages ? "disabled" : ""} onclick="goTracePage(${tracePage + 1})">Next</button>
+  `;
+}
+
+function paginationPages(current, total) {
+  const maxButtons = 7;
+  if (total <= maxButtons) return Array.from({length: total}, (_, i) => i + 1);
+  const pages = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) pages.push("...");
+  for (let p = start; p <= end; p++) pages.push(p);
+  if (end < total - 1) pages.push("...");
+  pages.push(total);
+  return pages;
+}
+
+function goTracePage(page) {
+  tracePage = Math.min(Math.max(page, 1), traceTotalPages);
+  fetchTraces();
 }
 
 async function loadTrace(tid) {
@@ -475,6 +565,15 @@ function fwColor(fw) {
 function statusColor(s) { return s === "done" ? "#2f9e44" : s === "error" ? "#f03e3e" : s === "cancelled" ? "#e8590c" : "#ffd43b"; }
 function fmtMs(ms) { if (!ms) return "-"; if (ms < 1000) return ms.toFixed(0) + "ms"; return (ms/1000).toFixed(2) + "s"; }
 function fmtNum(n) { if (!n) return "0"; return n.toLocaleString(); }
+function fmtPct(value) { return ((Number(value || 0)) * 100).toFixed(1) + "%"; }
+function fmtCost(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n) || n === 0) return "$0";
+  const abs = Math.abs(n);
+  if (abs >= 1) return "$" + n.toFixed(4);
+  if (abs >= 0.0001) return "$" + n.toFixed(6);
+  return "$" + n.toFixed(8);
+}
 function esc(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function resourceColor(r) { return {llm:"#3b82f6",tool:"#10b981",agent:"#f59e0b",chain:"#8b5cf6"}[r]||"#888"; }
 function eventIcon(e) { if (e?.includes("start")) return ">"; if (e?.includes("end") || e?.includes("finish")) return "stop"; if (e?.includes("error")) return "x"; return "-"; }
@@ -575,7 +674,7 @@ function renderFlowStep(step) {
   const sid = s.span_id;
   const selected = sid === activeSpan;
   const label = flowLabel(step);
-  const model = s.model ? `<span class="span-model">${esc(s.model)}</span>` : "";
+  const model = renderModelBadge(step);
   const tokens = end?.tokens?.total ? `<span class="span-tokens">${fmtNum(end.tokens.total)} tok</span>` : "";
   const latency = fmtMs(end?.latency_ms || s.latency_ms);
   const color = resourceColor(s.resource);
@@ -593,6 +692,47 @@ function renderFlowStep(step) {
       ${selected ? renderFlowDetail(step) : ""}
     </div>
   `;
+}
+
+function renderModelBadge(step) {
+  const model = modelNameForStep(step);
+  const impl = modelImplForStep(step);
+  if (!model && !impl) return "";
+  return `
+    <span class="span-model" title="${esc([model, impl].filter(Boolean).join(" | "))}">
+      ${model ? `<span class="span-model-name">${esc(model)}</span>` : ""}
+      ${impl ? `<span class="span-model-impl">${esc(impl)}</span>` : ""}
+    </span>
+  `;
+}
+
+function modelNameForStep(step) {
+  return modelNameFromSpan(step.start) || modelNameFromSpan(step.end) || "";
+}
+
+function modelNameFromSpan(span) {
+  if (!span) return "";
+  const meta = span.meta || {};
+  const invocation = meta.invocation_params || {};
+  const options = meta.options || {};
+  return span.model
+    || invocation.model
+    || invocation.model_name
+    || invocation.ls_model_name
+    || invocation.deployment_name
+    || options.model
+    || options.model_name
+    || options.ls_model_name
+    || options.deployment_name
+    || "";
+}
+
+function modelImplForStep(step) {
+  const meta = (step.start && step.start.meta) || (step.end && step.end.meta) || {};
+  const cls = meta.model_class || "";
+  const mod = meta.model_module || "";
+  if (cls && mod) return `${mod}.${cls}`;
+  return cls || mod || "";
 }
 
 function flowLabel(step) {
@@ -632,8 +772,16 @@ function renderLlmDetail(step) {
   const messages = normalizeMessages(start.messages || []);
   const calls = toolCallsFromSpan(end);
   const responseText = llmResponseText(end);
+  const modelName = modelNameForStep(step);
+  const modelImpl = modelImplForStep(step);
+  const cost = end?.cost_usd ?? start.cost_usd;
 
   return detailBox(`
+    ${(modelName || modelImpl || cost) ? `<div class="kv-grid">
+      ${modelName ? `<div class="kv-key">Model</div><div class="kv-val">${esc(modelName)}</div>` : ""}
+      ${modelImpl ? `<div class="kv-key">Module</div><div class="kv-val">${esc(modelImpl)}</div>` : ""}
+      ${cost ? `<div class="kv-key">Cost</div><div class="kv-val">${fmtCost(cost)}</div>` : ""}
+    </div>` : ""}
     ${messages.length ? `<div class="section-title">Prompt</div>${messages.map(renderMessage).join("")}` : ""}
     ${calls.length ? `<div class="section-title">Tool Calls Requested</div><pre class="msg">${esc(JSON.stringify(calls, null, 2))}</pre>` : ""}
     ${responseText ? `<div class="section-title">Model Response</div><pre class="msg">${esc(responseText)}</pre>` : ""}
@@ -721,7 +869,7 @@ function renderStats(data) {
       <div class="stat-card"><div class="label">Total Spans</div><div class="value">${t.span_count}</div></div>
       <div class="stat-card"><div class="label">LLM Calls</div><div class="value">${t.llm_calls}</div></div>
       <div class="stat-card"><div class="label">Total Tokens</div><div class="value">${fmtNum(t.total_tokens?.total)}</div></div>
-      <div class="stat-card"><div class="label">Total Cost</div><div class="value">$${(t.total_cost||0).toFixed(4)}</div></div>
+      <div class="stat-card"><div class="label">Total Cost</div><div class="value">${fmtCost(t.total_cost)}</div></div>
     </div>
   `;
 }

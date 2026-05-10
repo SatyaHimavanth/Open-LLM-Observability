@@ -80,6 +80,9 @@ uv sync --extra agent
 # Google ADK and Google GenAI support
 uv sync --extra google
 
+# LiteLLM-backed cost calculation
+uv sync --extra cost
+
 # CrewAI support
 uv sync --extra crewai
 
@@ -158,6 +161,48 @@ config = {
 ```
 
 The UI shows project and user labels in the run list and trace detail. The API also exposes project rollups for dashboard-style views.
+
+## Google ADK And Google GenAI Context
+
+Google traces accept the same kind of context through a lightweight callback helper:
+
+```python
+from universal_agent_obs.google import TraceContextCallbackHandler
+
+trace_callback = TraceContextCallbackHandler(
+    user={
+        "id": "demo-user",
+        "name": "Demo User",
+        "email": "demo.user@example.com",
+        "account": "demo-account",
+        "role": "tester",
+    },
+    tags=["sample", "google"],
+    metadata={"environment": "local"},
+)
+```
+
+Pass it to direct Google GenAI calls:
+
+```python
+client.models.generate_content(
+    model="gemini-3.1-flash-lite",
+    contents="Hi",
+    callbacks=[trace_callback],
+)
+```
+
+For ADK, use a runner and pass the callback into `run_async`:
+
+```python
+async for event in runner.run_async(
+    user_id="demo-user",
+    session_id=session.id,
+    new_message=message,
+    callbacks=[trace_callback],
+):
+    ...
+```
 
 ## Configuration
 
