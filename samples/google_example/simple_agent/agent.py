@@ -1,4 +1,5 @@
 from google.adk.agents.llm_agent import Agent
+from google.adk.models.lite_llm import Litellm
 
 
 def get_current_time(city: str) -> dict:
@@ -10,9 +11,12 @@ def get_weather(location: str) -> str:
     return f"Weather in {location}: Sunny, 72°F"
 
 
+model_name = "ollama_chat/qwen3.5:2b" # "azure/gpt-4.1"
+model = Litellm(model=model_name) # 'gemini-3.1-flash-lite'
+
 weather_agent = Agent(
     name="weather_agent_v1",
-    model='gemini-3.1-flash-lite',
+    model=model,
     description="Provides weather information for specific cities.",
     instruction="You are a helpful weather assistant. "
                 "When the user asks for the weather in a specific city, "
@@ -23,7 +27,7 @@ weather_agent = Agent(
 )
 
 root_agent = Agent(
-    model='gemini-3.1-flash-lite',
+    model=model,
     name='root_agent',
     description='A helpful assistant for user questions.',
     instruction='Answer user questions to the best of your knowledge',
