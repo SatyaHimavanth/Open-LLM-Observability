@@ -383,7 +383,9 @@ def _patch_openai_agents():
         trace_id = str(uuid.uuid4())
         previous_trace = _set_trace(trace_id, None)
         kwargs["context"] = _prepare_context(kwargs.get("context"), trace_id)
-        previous_context = _set_context(**context_from_callbacks(callbacks)) if callbacks else None
+        ctx = context_from_callbacks(callbacks).copy() if callbacks else {}
+        ctx.setdefault("framework", "openai-agents")
+        previous_context = _set_context(**ctx)
         try:
             return await _orig_run.__func__(cls, starting_agent, input, *args, **kwargs)
         finally:
@@ -395,7 +397,9 @@ def _patch_openai_agents():
         trace_id = str(uuid.uuid4())
         previous_trace = _set_trace(trace_id, None)
         kwargs["context"] = _prepare_context(kwargs.get("context"), trace_id)
-        previous_context = _set_context(**context_from_callbacks(callbacks)) if callbacks else None
+        ctx = context_from_callbacks(callbacks).copy() if callbacks else {}
+        ctx.setdefault("framework", "openai-agents")
+        previous_context = _set_context(**ctx)
         try:
             return _orig_run_sync.__func__(cls, starting_agent, input, *args, **kwargs)
         finally:
@@ -407,7 +411,9 @@ def _patch_openai_agents():
         trace_id = str(uuid.uuid4())
         previous_trace = _set_trace(trace_id, None)
         kwargs["context"] = _prepare_context(kwargs.get("context"), trace_id)
-        previous_context = _set_context(**context_from_callbacks(callbacks)) if callbacks else None
+        ctx = context_from_callbacks(callbacks).copy() if callbacks else {}
+        ctx.setdefault("framework", "openai-agents")
+        previous_context = _set_context(**ctx)
         try:
             return _orig_run_streamed.__func__(cls, starting_agent, input, *args, **kwargs)
         finally:

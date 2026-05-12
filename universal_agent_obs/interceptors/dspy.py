@@ -3,7 +3,7 @@ interceptors/dspy.py — Patches dspy.LM calls.
 """
 import time
 import uuid
-from ..core import Span, emit, get_or_new_trace, _current_span, detect_provider
+from ..core import Span, emit, get_or_new_trace, _current_span, detect_provider, _set_context, _restore_context
 
 def install():
     try:
@@ -20,10 +20,14 @@ def _patch_dspy():
     _orig_call = LM.__call__
     _orig_acall = LM.acall
 
-    def _patched_call(self, prompt, **kwargs):
+    def _patched_call(self, *args, **kwargs):
+        prompt = kwargs.get("prompt") or (args[0] if args else None)
+        messages = kwargs.get("messages")
+
         trace_id = get_or_new_trace()
         parent_span = _current_span()
         start_span_id = str(uuid.uuid4())
+        previous_ctx = _set_context(framework="dspy")
 
         # Determine model name
         model_name = getattr(self, "model", None) or getattr(self, "kwargs", {}).get("model")
@@ -36,13 +40,13 @@ def _patch_dspy():
             resource="llm",
             framework="dspy",
             model=model_name,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages or [{"role": "user", "content": prompt}],
             meta={"capture_via": "dspy_interceptor"},
         ))
 
         t0 = time.perf_counter()
         try:
-            response = _orig_call(self, prompt, **kwargs)
+            response = _orig_call(self, *args, **kwargs)
             latency = (time.perf_counter() - t0) * 1000
 
             # response is typically a list of strings or similar in DSPy
@@ -74,11 +78,17 @@ def _patch_dspy():
                 meta={"capture_via": "dspy_interceptor"},
             ))
             raise
+        finally:
+            _restore_context(previous_ctx)
 
-    async def _patched_acall(self, prompt, **kwargs):
+    async def _patched_acall(self, *args, **kwargs):
+        prompt = kwargs.get("prompt") or (args[0] if args else None)
+        messages = kwargs.get("messages")
+
         trace_id = get_or_new_trace()
         parent_span = _current_span()
         start_span_id = str(uuid.uuid4())
+        previous_ctx = _set_context(framework="dspy")
 
         model_name = getattr(self, "model", None) or getattr(self, "kwargs", {}).get("model")
 
@@ -90,13 +100,13 @@ def _patch_dspy():
             resource="llm",
             framework="dspy",
             model=model_name,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages or [{"role": "user", "content": prompt}],
             meta={"capture_via": "dspy_interceptor"},
         ))
 
         t0 = time.perf_counter()
         try:
-            response = await _orig_acall(self, prompt, **kwargs)
+            response = await _orig_acall(self, *args, **kwargs)
             latency = (time.perf_counter() - t0) * 1000
 
             resp_content = response if isinstance(response, (str, list)) else str(response)
@@ -127,6 +137,8 @@ def _patch_dspy():
                 meta={"capture_via": "dspy_interceptor"},
             ))
             raise
+        finally:
+            _restore_context(previous_ctx)
 
     LM.__call__ = _patched_call
     LM.acall = _patched_acall

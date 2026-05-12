@@ -57,9 +57,10 @@ def _patch_adk():
         trace_id = _current_trace() or span_id
         parent_span = _current_span()
         user_id = kwargs.get("user_id")
-        obs_context = context_from_callbacks(callbacks)
+        obs_context = context_from_callbacks(callbacks).copy()
         if "user" not in obs_context and user_id:
             obs_context["user"] = {"id": user_id}
+        obs_context.setdefault("framework", "google-adk")
         previous_context = _set_context(**obs_context)
         previous = _set_trace(trace_id, span_id)
         t0 = time.perf_counter()
