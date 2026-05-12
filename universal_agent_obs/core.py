@@ -69,50 +69,34 @@ class Span:
         return {k: v for k, v in data.items() if v is not None}
 
 
-# ── Thread-local + asyncio context ──────────────────────────────────────────
-_local = threading.local()
+# ── contextvars context ─────────────────────────────────────────────────────
+from contextvars import ContextVar
+
+_trace_id_var:     ContextVar[Optional[str]] = ContextVar("obs_trace_id",     default=None)
+_span_id_var:      ContextVar[Optional[str]] = ContextVar("obs_span_id",      default=None)
+_project_name_var: ContextVar[str]           = ContextVar("obs_project_name", default=PROJECT_NAME)
+_user_var:         ContextVar[Optional[dict]] = ContextVar("obs_user",         default=None)
+_tags_var:         ContextVar[Optional[list]] = ContextVar("obs_tags",         default=None)
+_metadata_var:     ContextVar[Optional[dict]] = ContextVar("obs_metadata",     default=None)
 
 def _current_trace() -> Optional[str]:
-    """Return the current trace_id for this thread/task."""
-    # Check asyncio task first
-    try:
-        task = asyncio.current_task()
-        if task and hasattr(task, "_obs_trace_id"):
-            return task._obs_trace_id
-    except RuntimeError:
-        pass
-    return getattr(_local, "trace_id", None)
+    return _trace_id_var.get()
 
 def _current_span() -> Optional[str]:
-    try:
-        task = asyncio.current_task()
-        if task and hasattr(task, "_obs_span_id"):
-            return task._obs_span_id
-    except RuntimeError:
-        pass
-    return getattr(_local, "span_id", None)
-
-def _task_attr(name: str, default=None):
-    try:
-        task = asyncio.current_task()
-        if task and hasattr(task, name):
-            return getattr(task, name)
-    except RuntimeError:
-        pass
-    return default
+    return _span_id_var.get()
 
 def _current_project() -> str:
-    return _task_attr("_obs_project_name") or getattr(_local, "project_name", None) or PROJECT_NAME
+    return _project_name_var.get() or PROJECT_NAME
 
 def _current_user() -> Optional[dict]:
-    return _task_attr("_obs_user") or getattr(_local, "user", None)
+    return _user_var.get()
 
 def _current_tags() -> Optional[list]:
-    tags = _task_attr("_obs_tags") or getattr(_local, "tags", None)
+    tags = _tags_var.get()
     return list(tags) if tags else None
 
 def _current_metadata() -> Optional[dict]:
-    metadata = _task_attr("_obs_metadata") or getattr(_local, "metadata", None)
+    metadata = _metadata_var.get()
     return dict(metadata) if metadata else None
 
 def _set_context(
@@ -122,43 +106,30 @@ def _set_context(
     tags: Optional[list] = None,
     metadata: Optional[dict] = None,
 ):
-    """Set trace attributes for the current thread and asyncio task."""
-    previous = (_current_project(), _current_user(), _current_tags(), _current_metadata())
-    project_name = project_name or previous[0] or PROJECT_NAME
-    user = user if user is not None else previous[1]
-    tags = tags if tags is not None else previous[2]
-    metadata = metadata if metadata is not None else previous[3]
+    """Set trace attributes for the current context."""
+    tokens = []
+    if project_name is not None:
+        tokens.append(_project_name_var.set(project_name))
+    if user is not None:
+        tokens.append(_user_var.set(_safe_json(user)))
+    if tags is not None:
+        tokens.append(_tags_var.set(_safe_json(tags)))
+    if metadata is not None:
+        tokens.append(_metadata_var.set(_safe_json(metadata)))
+    return tokens
 
-    _local.project_name = project_name
-    _local.user = _safe_json(user)
-    _local.tags = _safe_json(tags)
-    _local.metadata = _safe_json(metadata)
-    try:
-        task = asyncio.current_task()
-        if task:
-            task._obs_project_name = project_name
-            task._obs_user = _local.user
-            task._obs_tags = _local.tags
-            task._obs_metadata = _local.metadata
-    except RuntimeError:
-        pass
-    return previous
-
-def _restore_context(previous):
-    project_name, user, tags, metadata = previous or (PROJECT_NAME, None, None, None)
-    _local.project_name = project_name or PROJECT_NAME
-    _local.user = user
-    _local.tags = tags
-    _local.metadata = metadata
-    try:
-        task = asyncio.current_task()
-        if task:
-            task._obs_project_name = _local.project_name
-            task._obs_user = user
-            task._obs_tags = tags
-            task._obs_metadata = metadata
-    except RuntimeError:
-        pass
+def _restore_context(tokens):
+    if not tokens:
+        return
+    for token in reversed(tokens):
+        if token.var == _project_name_var:
+            _project_name_var.reset(token)
+        elif token.var == _user_var:
+            _user_var.reset(token)
+        elif token.var == _tags_var:
+            _tags_var.reset(token)
+        elif token.var == _metadata_var:
+            _metadata_var.reset(token)
 
 def set_context(
     *,
@@ -194,36 +165,23 @@ def _safe_json(value: Any):
         return str(value)[:500]
 
 def _set_trace(trace_id: str, span_id: str):
-    """Set trace context for current thread and asyncio task."""
-    previous = (_current_trace(), _current_span())
-    _local.trace_id = trace_id
-    _local.span_id  = span_id
-    try:
-        task = asyncio.current_task()
-        if task:
-            task._obs_trace_id = trace_id
-            task._obs_span_id  = span_id
-    except RuntimeError:
-        pass
-    return previous
+    """Set trace context for current context."""
+    t1 = _trace_id_var.set(trace_id)
+    t2 = _span_id_var.set(span_id)
+    return (t1, t2)
 
-def _restore_trace(previous):
+def _restore_trace(tokens):
     """Restore trace context saved by _set_trace."""
-    trace_id, span_id = previous or (None, None)
-    _local.trace_id = trace_id
-    _local.span_id = span_id
-    try:
-        task = asyncio.current_task()
-        if task:
-            task._obs_trace_id = trace_id
-            task._obs_span_id = span_id
-    except RuntimeError:
-        pass
+    if not tokens:
+        return
+    t1, t2 = tokens
+    _trace_id_var.reset(t1)
+    _span_id_var.reset(t2)
 
 def new_trace() -> str:
     tid = str(uuid.uuid4())
-    _local.trace_id = tid
-    _local.span_id  = None
+    _trace_id_var.set(tid)
+    _span_id_var.set(None)
     return tid
 
 def get_or_new_trace() -> str:

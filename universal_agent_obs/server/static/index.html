@@ -237,6 +237,7 @@
             <th>Trace ID</th>
             <th>Framework</th>
             <th>User</th>
+            <th>Steps</th>
             <th>Cost</th>
             <th>Tokens</th>
             <th>Duration</th>
@@ -521,8 +522,9 @@ function renderTraces() {
     <tr onclick="loadTrace('${t.trace_id}')">
       <td><div class="status-dot" style="background:${statusColor(t.status)}"></div>${t.status}</td>
       <td style="font-family:var(--font-mono);font-size:12px;">${t.trace_id.split("-")[0]}</td>
-      <td><span class="badge">${t.framework}</span></td>
+      <td><span class="badge" title="${t.framework}" style="border-left: 3px solid ${fwColor(t.framework)}">${fwIcon(t.framework)} ${t.framework}</span></td>
       <td><span style="font-size:12px;color:var(--text-muted)">${getUserName(t)}</span></td>
+      <td title="LLM calls: ${t.llm_calls} | Tool calls: ${t.tool_calls}"><span class="badge">${t.llm_calls + t.tool_calls}</span></td>
       <td>${fmtCost(t.total_cost)}</td>
       <td title="Input: ${fmtNum(t.total_tokens?.prompt)} | Reasoning: ${fmtNum(t.total_tokens?.reasoning)} | Output: ${fmtNum(t.total_tokens?.completion)}">${fmtNum(t.total_tokens?.total)}</td>
       <td>${fmtMs(t.duration_ms)}</td>
@@ -623,8 +625,12 @@ function renderTab(data) {
 
 // Utility formatting functions
 function fwColor(fw) {
-  const map = { langchain:"#1c7ed6", crewai:"#f03e3e", autogen:"#7048e8", "google-adk":"#2f9e44", "google_adk":"#2f9e44", "openai-agents":"#00a67e", llamaindex:"#e67700", custom:"#888" };
+  const map = { langchain:"#1c7ed6", crewai:"#f03e3e", autogen:"#7048e8", "google-adk":"#2f9e44", "google_adk":"#2f9e44", "openai-agents":"#00a67e", llamaindex:"#e67700", dspy:"#d9480f", custom:"#888" };
   return map[fw] || "#666";
+}
+function fwIcon(fw) {
+  const map = { langchain:"🦜", crewai:"🚣", autogen:"🤖", "google-adk":"☁️", "google_adk":"☁️", "google-genai":"🧠", "openai-agents":"🕵️", "openai-sdk":"🔌", dspy:"🔍", llamaindex:"🗂️", custom:"📦" };
+  return map[fw] || "📦";
 }
 function statusColor(s) { return s === "done" ? "#2f9e44" : s === "error" ? "#f03e3e" : s === "cancelled" ? "#e8590c" : "#ffd43b"; }
 function fmtMs(ms) {
@@ -1132,12 +1138,20 @@ function renderToolDetail(step) {
   const end = step.end;
   const out = end?.tool_output;
   const cleanOut = out ? (String(out).match(/content='([^']*)'/) ? String(out).match(/content='([^']*)'/)[1] : String(out)) : null;
+
+  let inputHtml = "";
+  if (start.tool_input) {
+    const inputObj = start.tool_input.input ?? start.tool_input;
+    const inputStr = typeof inputObj === "string" ? inputObj : JSON.stringify(inputObj, null, 2);
+    inputHtml = `<div class="section-title">Input</div><pre class="msg">${esc(inputStr)}</pre>`;
+  }
+
   return detailBox(`
     <div class="kv-grid">
       <div class="kv-key">Tool</div><div class="kv-val">${esc(start.tool_name || "")}</div>
       <div class="kv-key">Latency</div><div class="kv-val">${fmtMs(computeStepDurMs(step))}</div>
     </div>
-    ${start.tool_input ? `<div class="section-title">Input</div><pre class="msg">${esc(JSON.stringify(start.tool_input.input ?? start.tool_input, null, 2))}</pre>` : ""}
+    ${inputHtml}
     ${cleanOut ? `<div class="section-title">Output</div><pre class="msg">${esc(cleanOut)}</pre>` : ""}
   `);
 }

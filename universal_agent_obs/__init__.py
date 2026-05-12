@@ -60,6 +60,9 @@ def install():
     from .interceptors.openai_sdk import install as osdk
     _try("openai-sdk", osdk)
 
+    from .interceptors.dspy import install as dspy
+    _try("dspy", dspy)
+
     # ── HTTP transport fallback (catches everything else) ───────
     from .interceptors.http import install as http
     _try("http", http)
