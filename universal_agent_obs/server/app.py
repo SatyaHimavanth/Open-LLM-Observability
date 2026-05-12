@@ -363,17 +363,23 @@ def _estimate_cost(model: str, prompt: int, completion: int) -> Optional[float]:
     model = (model or "").lower()
     prices = {
         "gpt-4o-mini": (0.15, 0.60),
+        "gpt-4o": (2.5, 10.0),
+        "o1-preview": (15.0, 60.0),
+        "o1-mini": (1.1, 4.4),
+        "o1": (15.0, 60.0),
         "gpt-4.1-nano": (0.10, 0.40),
         "gpt-4.1-mini": (0.40, 1.60),
         "gpt-4.1": (2.00, 8.00),
-        "claude-opus": (15.0, 75.0),
-        "claude-sonnet": (3.0, 15.0),
-        "claude-haiku": (0.25, 1.25),
-        "gpt-4o": (2.5, 10.0),
+        "claude-3-5-sonnet": (3.0, 15.0),
+        "claude-3-5-haiku": (0.25, 1.25),
+        "claude-3-opus": (15.0, 75.0),
+        "claude-3-sonnet": (3.0, 15.0),
+        "claude-3-haiku": (0.25, 1.25),
         "gpt-4-turbo": (10.0, 30.0),
         "gpt-3.5": (0.5, 1.5),
-        "gemini-1.5-pro": (3.5, 10.5),
+        "gemini-1.5-pro": (1.25, 5.0), # Updated pricing
         "gemini-1.5-flash": (0.075, 0.30),
+        "gemini-2.0-flash": (0.10, 0.40),
         "mistral-large": (2.0, 6.0),
     }
     for key, (inp, out) in prices.items():
@@ -597,19 +603,23 @@ def _summary_from_spans(trace_id: str, spans: list[dict]) -> dict:
             "task_complete",
             "agent_stream_end",
             "agent_invoke_end",
+            "agent_end",
+            "handoff", # OpenAI Agents handoff might be terminal for a specific agent
         } and status != "error":
+            # For handoff, only mark as done if it's a root-level event (not usually)
+            # but we include it in terminal patterns.
             status = "done"
             root_completed = True
-        elif span.get("event", "").endswith("_end") and span.get("parent_span") in root_starts and status != "error":
+        elif span.get("event", "").endswith("_end") and (not span.get("parent_span") or span.get("parent_span") in root_starts) and status != "error":
             status = "done"
             root_completed = True
 
-    # Detect cancelled: has start events but no corresponding root-level end,
-    # and hasn't received new spans in over 30 seconds
+    # Detect cancelled/stale: has start events but no corresponding root-level end,
+    # and hasn't received new spans in over 2 minutes (increased from 30s for long-running steps)
     if status == "running":
         staleness = time.time() - updated_at
         has_starts = any(e for e in all_events if e and ("_start" in e or e.startswith("llm_start") or e.startswith("chain_start")))
-        if has_starts and staleness > 30:
+        if has_starts and staleness > 120:
             status = "cancelled"
 
     return {
