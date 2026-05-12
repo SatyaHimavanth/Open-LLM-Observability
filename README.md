@@ -20,6 +20,8 @@ It ships with:
 ![Home Page](assets/Home_Page.png)
 ### Traces Page
 ![Traces Page](assets/Traces_Page.png)
+### Example Trace
+![Example Trace](assets/Example_Trace.png)
 ### Settings Page
 ![Settings Page](assets/Settings_Page.png)
 
@@ -73,9 +75,6 @@ Use extras for the frameworks you want to trace:
 ```bash
 # LangChain/LangGraph interceptor support
 uv sync --extra langchain
-
-# Bundled test agent: LangChain + Azure OpenAI + dotenv
-uv sync --extra agent
 
 # Google ADK and Google GenAI support
 uv sync --extra google

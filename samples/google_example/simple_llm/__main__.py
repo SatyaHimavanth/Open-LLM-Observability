@@ -5,7 +5,6 @@ import universal_agent_obs
 from universal_agent_obs.google import TraceContextCallbackHandler
 from google import genai
 
-# The client gets the API key from the environment variable `GEMINI_API_KEY`.
 client = genai.Client()
 trace_callback = TraceContextCallbackHandler(
     user={

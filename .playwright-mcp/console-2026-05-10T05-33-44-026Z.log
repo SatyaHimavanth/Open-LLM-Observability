@@ -1,8 +1,0 @@
-[     634ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) @ http://localhost:4317/:0
-[   67803ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:4317/projects?user_id=c44ba8af-b00b-4cb0-9bf0-3064c7f375d9:0
-[  119713ms] [ERROR] WebSocket connection to 'ws://localhost:4317/ws?user_id=c44ba8af-b00b-4cb0-9bf0-3064c7f375d9' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:4317/:368
-[  124052ms] [ERROR] WebSocket connection to 'ws://localhost:4317/ws?user_id=c44ba8af-b00b-4cb0-9bf0-3064c7f375d9' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:4317/:368
-[  150766ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) @ http://localhost:4317/:0
-[  230196ms] [ERROR] WebSocket connection to 'ws://localhost:4317/ws?user_id=c44ba8af-b00b-4cb0-9bf0-3064c7f375d9' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:4317/:368
-[  234514ms] [ERROR] WebSocket connection to 'ws://localhost:4317/ws?user_id=c44ba8af-b00b-4cb0-9bf0-3064c7f375d9' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:4317/:368
-[  247018ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) @ http://localhost:4317/:0
