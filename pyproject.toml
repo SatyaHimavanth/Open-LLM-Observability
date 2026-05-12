@@ -3,12 +3,12 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-traces"
+name = "Open-LLM-Observability"
 version = "0.1.0"
 description = "Universal LLM and agent tracing for Python agent frameworks"
 readme = "README.md"
 requires-python = ">=3.12"
-keywords = ["agents", "observability", "langchain", "tracing", "llm"]
+keywords = ["agents", "observability", "tracing", "llm", "langchain"]
 dependencies = [
     "fastapi>=0.136.1",
     "httpx>=0.28.1",
@@ -27,18 +27,19 @@ langchain = [
 google = [
     "google-adk>=1.14.1",
     "google-genai>=1.75.0",
+    "litellm>=1.83.0",
 ]
 cost = [
     "litellm>=1.80.0",
 ]
 crewai = [
-    "crewai>=1.8.0",
-    "litellm>=1.80.0",
+    "crewai[azure-ai-inference]>=1.14.4",
 ]
 autogen = [
     "pyautogen>=0.10.0",
 ]
 openai-agents = [
+    "openai>=2.36.0",
     "openai-agents>=0.6.0",
 ]
 postgres = [

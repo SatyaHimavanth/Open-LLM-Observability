@@ -52,6 +52,8 @@ async def main():
                 for part in event.content.parts:
                     if getattr(part, "text", None):
                         print(part.text)
+    except Exception as e:
+        print(e)
     finally:
         universal_agent_obs.flush(timeout=10)
 

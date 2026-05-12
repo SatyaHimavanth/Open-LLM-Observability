@@ -20,8 +20,25 @@ LLM_HOSTS = (
     "models.inference.ai.azure.com",
 )
 
+LOCAL_LLM_HOSTS = (
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+)
+
+LOCAL_LLM_PATHS = (
+    "/v1/chat/completions",
+    "/v1/completions",
+    "/v1/responses",
+    "/api/generate",
+    "/api/chat",
+)
+
 def _is_llm_url(url: str) -> bool:
-    return any(h in str(url) for h in LLM_HOSTS)
+    text = str(url)
+    if any(h in text for h in LLM_HOSTS):
+        return True
+    return any(h in text for h in LOCAL_LLM_HOSTS) and any(p in text for p in LOCAL_LLM_PATHS)
 
 def _parse_request(request) -> dict:
     try:
@@ -39,8 +56,31 @@ def _parse_response(response) -> dict:
     except Exception:
         return {}
 
+
+def _detect_framework(req_body: dict, resp_body: dict) -> str:
+    if "messages" in req_body or "choices" in resp_body or "usage" in resp_body:
+        return "openai-sdk"
+    if "contents" in req_body or "candidates" in resp_body or "usageMetadata" in resp_body:
+        return "google-genai"
+    return "custom"
+
+
+def _extract_openai_response_content(resp_body: dict):
+    choices = resp_body.get("choices") or []
+    if not choices:
+        return None
+    message = (choices[0] or {}).get("message") or {}
+    content = message.get("content")
+    if content is not None:
+        return content
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        return {"tool_calls": tool_calls}
+    return message or None
+
 def _build_span(req_body: dict, resp_body: dict, latency_ms: float, status: int) -> Span:
     model   = req_body.get("model", "") or resp_body.get("modelVersion", "")
+    framework = _detect_framework(req_body, resp_body)
 
     # ── Token usage: OpenAI format or Gemini format ──
     tokens  = resp_body.get("usage", {})
@@ -55,8 +95,7 @@ def _build_span(req_body: dict, resp_body: dict, latency_ms: float, status: int)
             }
 
     # ── Response content: OpenAI format or Gemini format ──
-    content = resp_body.get("choices", [{}])[0].get("message") \
-              or resp_body.get("content", [])
+    content = _extract_openai_response_content(resp_body) or resp_body.get("content", [])
     if not content:
         # Gemini API uses candidates[].content.parts[].text
         candidates = resp_body.get("candidates", [])
@@ -74,6 +113,7 @@ def _build_span(req_body: dict, resp_body: dict, latency_ms: float, status: int)
         parent_span = _current_span(),
         event       = "llm_end" if status == 200 else "llm_error",
         resource    = "llm",
+        framework   = framework,
         model       = model,
         provider    = detect_provider(model),
         messages    = messages,
@@ -107,6 +147,7 @@ def patch_httpx():
                 trace_id=trace_id,
                 event="llm_start",
                 resource="llm",
+                framework=_detect_framework(req_body, {}),
                 model=req_body.get("model", ""),
                 messages=req_body.get("messages") or req_body.get("contents"),
                 meta={"capture_via": "http_intercept"},
@@ -136,6 +177,7 @@ def patch_httpx():
                 trace_id=trace_id,
                 event="llm_start",
                 resource="llm",
+                framework=_detect_framework(req_body, {}),
                 model=req_body.get("model", ""),
                 messages=req_body.get("messages") or req_body.get("contents"),
                 meta={"capture_via": "http_intercept"},

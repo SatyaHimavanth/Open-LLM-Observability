@@ -204,6 +204,51 @@ async for event in runner.run_async(
     ...
 ```
 
+## CrewAI Context
+
+CrewAI traces accept the same lightweight trace context via the provided callback helper. Create a `TraceContextCallbackHandler` and pass it into your CrewAI router or agent invocation as part of the `callbacks` list.
+
+```python
+from universal_agent_obs.crewai import TraceContextCallbackHandler
+
+trace_callback = TraceContextCallbackHandler(
+    user={
+        "id": "demo-user",
+        "name": "Demo User",
+        "email": "demo.user@example.com",
+    },
+    tags=["sample", "crewai"],
+    metadata={"environment": "local"},
+)
+
+# Pass `trace_callback` into your CrewAI invocation.
+# Example (pseudo): router_agent.kickoff(input, callbacks=[trace_callback])
+```
+
+## OpenAI SDK / OpenAI Agents Context
+
+Use the OpenAI helper when instrumenting direct OpenAI SDK calls or the OpenAI Agents `Runner`. The handler works with both chat completion calls and agent runs — pass it in via the `callbacks` parameter.
+
+```python
+from universal_agent_obs.openai import TraceContextCallbackHandler
+
+trace_callback = TraceContextCallbackHandler(
+    user={"id": "demo-user", "name": "Demo User", "email": "demo.user@example.com"},
+    tags=["sample", "openai"],
+    metadata={"environment": "local"},
+)
+
+# OpenAI SDK chat completion example:
+client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "What's the weather?"}],
+    callbacks=[trace_callback],
+)
+
+# OpenAI Agents runner example:
+# runner.run(..., callbacks=[trace_callback])
+```
+
 ## Configuration
 
 | Env var | Default | Description |

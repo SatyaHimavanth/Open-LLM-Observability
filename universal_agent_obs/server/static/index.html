@@ -204,9 +204,20 @@
     </div>
 
     <div id="view-traces" style="display:none;">
-      <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
-        <input type="text" id="search" class="input" style="width:300px" placeholder="Search traces..." oninput="onTraceSearch()">
-      </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:16px;align-items:center;">
+          <div style="display:flex;gap:12px;align-items:center;">
+            <input type="text" id="search" class="input" style="width:300px" placeholder="Search traces..." oninput="onTraceSearch()">
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <label for="per-page-select" style="color:var(--text-muted);font-size:12px;margin-right:6px;">Per page</label>
+            <select id="per-page-select" class="input" style="width:110px;" onchange="onTracePerPageChange(this.value)">
+              <!-- <option value="1">1</option> -->
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+        </div>
       <div class="trace-summary-cards">
         <div class="trace-summary-card">
           <div class="label">Total Cost</div>
@@ -304,7 +315,7 @@ let tg_resize_listener_added = false;
 let drawerOpening = false;
 let ws = null;
 let tracePage = 1;
-let tracePerPage = 50;
+let tracePerPage = Number(localStorage.getItem('tracePerPage')) || 50;
 let traceTotalPages = 1;
 let traceTotal = 0;
 let traceStats = {total_cost:0, success_rate:0, error_rate:0, success_count:0, error_count:0};
@@ -371,6 +382,8 @@ function initApp() {
   document.getElementById('set-client-id').value = currentUser.client_id;
   document.getElementById('set-client-secret').value = currentUser.client_secret;
   fetchProjects();
+  const perSel = document.getElementById('per-page-select');
+  if (perSel) perSel.value = String(tracePerPage);
   connect();
 }
 
@@ -489,6 +502,14 @@ function onTraceSearch() {
   tracePage = 1;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(fetchTraces, 200);
+}
+
+function onTracePerPageChange(value) {
+  const n = Number(value) || 10;
+  tracePerPage = n;
+  tracePage = 1;
+  try { localStorage.setItem('tracePerPage', String(n)); } catch (e) {}
+  fetchTraces();
 }
 
 function renderTraces() {
@@ -622,7 +643,7 @@ function fmtCost(value) {
   if (abs >= 0.0001) return "$" + n.toFixed(6);
   return "$" + n.toFixed(8);
 }
-function esc(s) { return String(s ?? "").replace(/&/g,"&").replace(/</g,"<").replace(/>/g,">"); }
+function esc(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function resourceColor(r) { return {llm:"#3b82f6",tool:"#10b981",agent:"#f59e0b",chain:"#8b5cf6"}[r]||"#888"; }
 function eventIcon(e) { if (e?.includes("start")) return ">"; if (e?.includes("end") || e?.includes("finish")) return "stop"; if (e?.includes("error")) return "x"; return "-"; }
 
@@ -667,10 +688,16 @@ function buildFlowSteps(spans) {
   sorted.forEach(s => {
     if (consumed.has(s.span_id)) return;
 
-    if (s.event === "agent_stream_start" || s.event === "agent_invoke_start") {
+    if (s.event === "agent_stream_start" || s.event === "agent_invoke_start" || s.event === "agent_start") {
       const end = findEndSpan(s, byParent);
       if (end) consumed.add(end.span_id);
       steps.push({kind:"agent", start:s, end});
+      return;
+    }
+
+    if (s.event === "agent_end") {
+      steps.push({kind:"agent", start:s, end:s});
+      consumed.add(s.span_id);
       return;
     }
 
@@ -696,6 +723,19 @@ function buildFlowSteps(spans) {
 
     if (s.event === "tool_end" || s.event === "tool_error") {
       steps.push({kind:"tool", start:s, end:s});
+      consumed.add(s.span_id);
+      return;
+    }
+
+    // CrewAI-specific events
+    if (s.event === "agent_step") {
+      steps.push({kind:"agent", start:s, end:s});
+      consumed.add(s.span_id);
+      return;
+    }
+
+    if (s.event === "task_complete") {
+      steps.push({kind:"task", start:s, end:s});
       consumed.add(s.span_id);
       return;
     }
@@ -994,7 +1034,11 @@ function modelImplForStep(step) {
 
 function flowLabel(step) {
   const s = step.start;
-  if (step.kind === "agent") return s.agent_name || "Agent run";
+  if (step.kind === "task") return (s.meta?.task_id ? `Task: ${s.meta.task_id}` : null) || s.agent_name || "Task complete";
+  if (step.kind === "agent") {
+    if (s.event === "agent_step") return s.agent_name ? `${s.agent_name} step` : "Agent step";
+    return s.agent_name || "Agent run";
+  }
   if (step.kind === "llm") return toolCallsFromSpan(step.end).length ? "Tool decision" : "Model response";
   if (step.kind === "tool") return s.tool_name || "Tool call";
   return s.agent_name || s.tool_name || s.event || "span";
@@ -1002,6 +1046,7 @@ function flowLabel(step) {
 
 function renderFlowDetail(step) {
   if (showRawSpanDetails) return detailBox(`<pre class="msg">${esc(JSON.stringify(step.end ? {start: step.start, end: step.end} : step.start, null, 2))}</pre>`);
+  if (step.kind === "task") return renderTaskDetail(step);
   if (step.kind === "agent") return renderAgentDetail(step);
   if (step.kind === "llm") return renderLlmDetail(step);
   if (step.kind === "tool") return renderToolDetail(step);
@@ -1009,17 +1054,53 @@ function renderFlowDetail(step) {
 }
 
 function renderAgentDetail(step) {
-  const input = normalizeMessages(step.start.meta?.input?.messages || step.start.messages || []);
-  const agents = step.start.meta?.agents || [];
-  const user = step.start.user || {};
+  const s = step.start;
+  const e = step.end || {};
+  const input = normalizeMessages(s.meta?.input?.messages || e.meta?.input?.messages || s.messages || e.messages || []);
+  const agents = s.meta?.agents || e.meta?.agents || [];
+  const user = s.user || {};
+  const thought = s.meta?.thought || "";
+  const result  = s.meta?.result  || "";
+  const finalOutput = e.meta?.output || "";
+  const usage = e.meta?.usage || null;
+  const toolCalls = e.meta?.tool_calls || [];
+  const toolInput = s.tool_input?.input || "";
   return detailBox(`
     <div class="kv-grid">
       <div class="kv-key">Status</div><div class="kv-val">${step.end ? "Completed" : "Running"}</div>
       <div class="kv-key">Duration</div><div class="kv-val">${fmtMs(computeStepDurMs(step))}</div>
+      ${s.tool_name ? `<div class="kv-key">Tool Used</div><div class="kv-val">${esc(s.tool_name)}</div>` : ""}
       ${userLabel(user) ? `<div class="kv-key">User</div><div class="kv-val">${esc(userLabel(user))}</div>` : ""}
     </div>
-    ${input.length ? `<div class="section-title">User Input</div>${input.map(renderMessage).join("")}` : ""}
     ${agents.length ? `<div class="section-title">Agents & Tools</div>${renderAgents(agents)}` : ""}
+    ${input.length ? `<div class="section-title">Prompt</div>${input.map(renderMessage).join("")}` : ""}
+    ${toolInput ? `<div class="section-title">Tool Input</div><pre class="msg">${esc(toolInput)}</pre>` : ""}
+    ${toolCalls.length ? `<div class="section-title">Tool Calls</div><pre class="msg">${esc(JSON.stringify(toolCalls, null, 2))}</pre>` : ""}
+    ${thought ? `<div class="section-title">Thought</div><pre class="msg">${esc(thought)}</pre>` : ""}
+    ${result  ? `<div class="section-title">Step Result</div><pre class="msg">${esc(result)}</pre>`  : ""}
+    ${finalOutput ? `<div class="section-title">Final Output</div><pre class="msg">${esc(finalOutput)}</pre>` : ""}
+    ${usage ? `<div class="section-title">Usage</div>${renderUsage({
+      prompt: usage.prompt_tokens ?? usage.input_tokens,
+      completion: usage.completion_tokens ?? usage.output_tokens,
+      reasoning: usage.reasoning_tokens ?? usage.output_tokens_details?.reasoning_tokens,
+      cached: usage.cached_tokens ?? usage.input_tokens_details?.cached_tokens,
+      total: usage.total_tokens,
+    })}` : ""}
+  `);
+}
+
+function renderTaskDetail(step) {
+  const s = step.start;
+  const output = s.meta?.output || "";
+  const input  = normalizeMessages(s.messages || []);
+  return detailBox(`
+    <div class="kv-grid">
+      ${s.agent_name ? `<div class="kv-key">Agent</div><div class="kv-val">${esc(s.agent_name)}</div>` : ""}
+      ${s.meta?.task_id ? `<div class="kv-key">Task</div><div class="kv-val">${esc(s.meta.task_id)}</div>` : ""}
+      <div class="kv-key">Duration</div><div class="kv-val">${fmtMs(computeStepDurMs(step))}</div>
+    </div>
+    ${input.length ? `<div class="section-title">Task Description</div>${input.map(renderMessage).join("")}` : ""}
+    ${output ? `<div class="section-title">Task Output</div><pre class="msg">${esc(output)}</pre>` : ""}
   `);
 }
 
@@ -1094,7 +1175,19 @@ function toolCallsFromSpan(span) {
   return [...direct, ...generated];
 }
 function llmResponseText(span) {
-  if (span?.response?.content) return span.response.content;
+  const content = span?.response?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map(item => {
+      if (typeof item === "string") return item;
+      if (item?.text) return item.text;
+      return JSON.stringify(item, null, 2);
+    }).join("\n\n");
+  }
+  if (content && typeof content === "object") {
+    if (content.text) return String(content.text);
+    return JSON.stringify(content, null, 2);
+  }
   return (span?.response?.generations || []).flat().map(g => g.text || "").filter(Boolean).join("\n\n");
 }
 function renderUsage(tokens) {

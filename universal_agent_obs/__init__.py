@@ -57,6 +57,9 @@ def install():
     from .interceptors.google_genai import install as ggenai
     _try("google-genai", ggenai)
 
+    from .interceptors.openai_sdk import install as osdk
+    _try("openai-sdk", osdk)
+
     # ── HTTP transport fallback (catches everything else) ───────
     from .interceptors.http import install as http
     _try("http", http)
