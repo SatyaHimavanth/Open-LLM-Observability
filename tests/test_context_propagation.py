@@ -11,7 +11,9 @@ async def test_trace_propagation():
 
     assert _current_trace() is None
 
-    tokens = _set_trace(trace_id, span_id)
+    # Structure: (old_tid, old_sid, tok1, tok2)
+    state = _set_trace(trace_id, span_id)
+    assert len(state) == 4
     assert _current_trace() == trace_id
     assert _current_span() == span_id
 
@@ -22,7 +24,7 @@ async def test_trace_propagation():
 
     assert await asyncio.create_task(subtask())
 
-    _restore_trace(tokens)
+    _restore_trace(state)
     assert _current_trace() is None
     assert _current_span() is None
 
@@ -32,7 +34,10 @@ async def test_context_propagation():
     tags = ["tag1"]
     meta = {"key": "val"}
 
-    tokens = _set_context(project_name=project, user=user, tags=tags, metadata=meta)
+    # Structure: (old_values, tokens_list)
+    state = _set_context(project_name=project, user=user, tags=tags, metadata=meta)
+    assert len(state) == 2
+    assert isinstance(state[1], list)
 
     assert _current_project() == project
     assert _current_user() == user
@@ -48,7 +53,7 @@ async def test_context_propagation():
 
     assert await asyncio.create_task(subtask())
 
-    _restore_context(tokens)
+    _restore_context(state)
     # default project name is "default"
     assert _current_project() == "default"
     assert _current_user() is None

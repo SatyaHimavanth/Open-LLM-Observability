@@ -63,7 +63,9 @@ def _patch_langchain():
             parent_span = str(parent_run_id) if parent_run_id else _current_span()
             trace_id = _root(parent_run_id, run_id)
             self._t[str(run_id)] = time.perf_counter()
-            self._obs_ctx[str(run_id)] = _set_context(**(obs_context or _active_agent_context))
+            obs_ctx = (obs_context or _active_agent_context).copy()
+            obs_ctx.setdefault("framework", "langchain")
+            self._obs_ctx[str(run_id)] = _set_context(**obs_ctx)
             self._ctx[str(run_id)] = _set_trace(trace_id, str(run_id))
             return trace_id, parent_span
 
@@ -506,6 +508,7 @@ def _agent_start(agent, event, input, config=None):
     span_id = str(uuid.uuid4())
     trace_id = _current_trace() or span_id
     obs_context = _obs_context_from_config(config)
+    obs_context.setdefault("framework", "langchain")
     previous_obs = _set_context(**obs_context)
     previous = _set_trace(trace_id, span_id)
     _active_agent_trace_id = trace_id

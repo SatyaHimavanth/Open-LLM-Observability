@@ -54,7 +54,9 @@ def _patch_sync_models(Models):
 
         model = kwargs.get("model")
         contents = kwargs.get("contents")
-        previous_context = _set_context(**context_from_callbacks(callbacks))
+        ctx = context_from_callbacks(callbacks).copy()
+        ctx.setdefault("framework", "google-genai")
+        previous_context = _set_context(**ctx)
         start_span_id, trace_id, t0 = _emit_start(model, contents, "google_genai_sdk")
         previous = _set_trace(trace_id, start_span_id)
         try:
@@ -76,7 +78,9 @@ def _patch_sync_models(Models):
 
         model = kwargs.get("model")
         contents = kwargs.get("contents")
-        previous_context = _set_context(**context_from_callbacks(callbacks))
+        ctx = context_from_callbacks(callbacks).copy()
+        ctx.setdefault("framework", "google-genai")
+        previous_context = _set_context(**ctx)
         start_span_id, trace_id, t0 = _emit_start(model, contents, "google_genai_sdk_stream")
         previous = _set_trace(trace_id, start_span_id)
         chunks = []
@@ -112,7 +116,9 @@ def _patch_async_models(AsyncModels):
 
         model = kwargs.get("model")
         contents = kwargs.get("contents")
-        previous_context = _set_context(**context_from_callbacks(callbacks))
+        ctx = context_from_callbacks(callbacks).copy()
+        ctx.setdefault("framework", "google-genai")
+        previous_context = _set_context(**ctx)
         start_span_id, trace_id, t0 = _emit_start(model, contents, "google_genai_sdk")
         previous = _set_trace(trace_id, start_span_id)
         try:
@@ -135,7 +141,9 @@ def _patch_async_models(AsyncModels):
 
         model = kwargs.get("model")
         contents = kwargs.get("contents")
-        previous_context = _set_context(**context_from_callbacks(callbacks))
+        ctx = context_from_callbacks(callbacks).copy()
+        ctx.setdefault("framework", "google-genai")
+        previous_context = _set_context(**ctx)
         start_span_id, trace_id, t0 = _emit_start(model, contents, "google_genai_sdk_stream")
         previous = _set_trace(trace_id, start_span_id)
         chunks = []

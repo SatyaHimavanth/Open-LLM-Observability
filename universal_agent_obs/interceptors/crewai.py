@@ -102,11 +102,12 @@ def _patch_crewai():
             try:
                 # apply any collected context from callbacks for the duration
                 # of the kickoff run
-                if getattr(self, "_obs_callback_context", None):
-                    try:
-                        previous_ctx = _set_context(**(self._obs_callback_context or {}))
-                    except Exception:
-                        previous_ctx = None
+                obs_ctx = (self._obs_callback_context or {}).copy()
+                obs_ctx.setdefault("framework", "crewai")
+                try:
+                    previous_ctx = _set_context(**obs_ctx)
+                except Exception:
+                    previous_ctx = None
                 return _orig_kickoff(self, *args, **kwargs)
             finally:
                 if previous_ctx is not None:

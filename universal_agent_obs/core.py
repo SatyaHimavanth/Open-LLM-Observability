@@ -78,6 +78,7 @@ _project_name_var: ContextVar[str]           = ContextVar("obs_project_name", de
 _user_var:         ContextVar[Optional[dict]] = ContextVar("obs_user",         default=None)
 _tags_var:         ContextVar[Optional[list]] = ContextVar("obs_tags",         default=None)
 _metadata_var:     ContextVar[Optional[dict]] = ContextVar("obs_metadata",     default=None)
+_framework_var:    ContextVar[Optional[str]] = ContextVar("obs_framework",    default=None)
 
 def _current_trace() -> Optional[str]:
     return _trace_id_var.get()
@@ -87,6 +88,9 @@ def _current_span() -> Optional[str]:
 
 def _current_project() -> str:
     return _project_name_var.get() or PROJECT_NAME
+
+def _current_framework() -> Optional[str]:
+    return _framework_var.get()
 
 def _current_user() -> Optional[dict]:
     return _user_var.get()
@@ -105,8 +109,15 @@ def _set_context(
     user: Optional[dict] = None,
     tags: Optional[list] = None,
     metadata: Optional[dict] = None,
+    framework: Optional[str] = None,
 ):
     """Set trace attributes for the current context."""
+    previous_values = (
+        _project_name_var.get(),
+        _user_var.get(),
+        _tags_var.get(),
+        _metadata_var.get(),
+    )
     tokens = []
     if project_name is not None:
         tokens.append(_project_name_var.set(project_name))
@@ -116,20 +127,16 @@ def _set_context(
         tokens.append(_tags_var.set(_safe_json(tags)))
     if metadata is not None:
         tokens.append(_metadata_var.set(_safe_json(metadata)))
-    return tokens
+    if framework is not None:
+        tokens.append(_framework_var.set(framework))
+    return (previous_values, tokens)
 
-def _restore_context(tokens):
-    if not tokens:
+def _restore_context(state):
+    if not state or not isinstance(state, tuple) or len(state) != 2:
         return
+    _, tokens = state
     for token in reversed(tokens):
-        if token.var == _project_name_var:
-            _project_name_var.reset(token)
-        elif token.var == _user_var:
-            _user_var.reset(token)
-        elif token.var == _tags_var:
-            _tags_var.reset(token)
-        elif token.var == _metadata_var:
-            _metadata_var.reset(token)
+        token.var.reset(token)
 
 def set_context(
     *,
@@ -166,15 +173,17 @@ def _safe_json(value: Any):
 
 def _set_trace(trace_id: str, span_id: str):
     """Set trace context for current context."""
+    old_trace = _trace_id_var.get()
+    old_span  = _span_id_var.get()
     t1 = _trace_id_var.set(trace_id)
     t2 = _span_id_var.set(span_id)
-    return (t1, t2)
+    return (old_trace, old_span, t1, t2)
 
-def _restore_trace(tokens):
+def _restore_trace(state):
     """Restore trace context saved by _set_trace."""
-    if not tokens:
+    if not state or len(state) != 4:
         return
-    t1, t2 = tokens
+    _, _, t1, t2 = state
     _trace_id_var.reset(t1)
     _span_id_var.reset(t2)
 

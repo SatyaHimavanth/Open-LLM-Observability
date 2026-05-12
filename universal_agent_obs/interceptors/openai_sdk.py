@@ -24,7 +24,9 @@ def _patch_openai_sdk():
     _orig_async_create = AsyncCompletions.create
 
     def _patched_create(self, *args, callbacks=None, **kwargs):
-        previous_context = _set_context(**context_from_callbacks(callbacks)) if callbacks else None
+        ctx = context_from_callbacks(callbacks).copy() if callbacks else {}
+        ctx.setdefault("framework", "openai-sdk")
+        previous_context = _set_context(**ctx)
         try:
             return _orig_create(self, *args, **kwargs)
         finally:
@@ -32,7 +34,9 @@ def _patch_openai_sdk():
                 _restore_context(previous_context)
 
     async def _patched_async_create(self, *args, callbacks=None, **kwargs):
-        previous_context = _set_context(**context_from_callbacks(callbacks)) if callbacks else None
+        ctx = context_from_callbacks(callbacks).copy() if callbacks else {}
+        ctx.setdefault("framework", "openai-sdk")
+        previous_context = _set_context(**ctx)
         try:
             return await _orig_async_create(self, *args, **kwargs)
         finally:
