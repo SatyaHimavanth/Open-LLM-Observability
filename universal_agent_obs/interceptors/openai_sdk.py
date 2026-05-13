@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from ..core import _restore_context, _set_context
+from ..core import (
+    _current_framework,
+    _restore_context,
+    _set_context,
+    detect_framework_from_stack,
+)
 from ..openai import context_from_callbacks
 
 
@@ -23,9 +28,16 @@ def _patch_openai_sdk():
     _orig_create = Completions.create
     _orig_async_create = AsyncCompletions.create
 
+    def _resolved_framework() -> str:
+        # Prefer explicit context first, then stack-based detection for frameworks
+        # that may execute in worker threads where contextvars are not propagated.
+        return _current_framework() or detect_framework_from_stack() or "openai-sdk"
+
     def _patched_create(self, *args, callbacks=None, **kwargs):
         ctx = context_from_callbacks(callbacks).copy() if callbacks else {}
-        ctx.setdefault("framework", "openai-sdk")
+        # Preserve already active framework (for example CrewAI), and fall back to
+        # stack detection before defaulting to openai-sdk.
+        ctx.setdefault("framework", _resolved_framework())
         previous_context = _set_context(**ctx)
         try:
             return _orig_create(self, *args, **kwargs)
@@ -35,7 +47,9 @@ def _patch_openai_sdk():
 
     async def _patched_async_create(self, *args, callbacks=None, **kwargs):
         ctx = context_from_callbacks(callbacks).copy() if callbacks else {}
-        ctx.setdefault("framework", "openai-sdk")
+        # Preserve already active framework (for example CrewAI), and fall back to
+        # stack detection before defaulting to openai-sdk.
+        ctx.setdefault("framework", _resolved_framework())
         previous_context = _set_context(**ctx)
         try:
             return await _orig_async_create(self, *args, **kwargs)

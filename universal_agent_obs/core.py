@@ -251,6 +251,7 @@ def _post_span(span_dict: dict):
 
 
 def _worker():
+    _auth_warned = False
     while True:
         span_dict = None
         try:
@@ -260,8 +261,10 @@ def _worker():
             _post_span(span_dict)
         except queue.Empty:
             continue
-        except Exception:
-            pass   # observability must never crash the agent
+        except Exception as e:
+            if not _auth_warned and "401" in str(e):
+                print(f"[agent-obs] WARNING: Ingest rejected (401 Unauthorized). Set AGENT_OBS_CLIENT_ID and AGENT_OBS_CLIENT_SECRET env vars.")
+                _auth_warned = True
         finally:
             if span_dict is not None:
                 _emit_queue.task_done()

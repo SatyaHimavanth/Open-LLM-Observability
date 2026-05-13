@@ -323,11 +323,38 @@ let traceStats = {total_cost:0, success_rate:0, error_rate:0, success_count:0, e
 let searchTimer = null;
 
 // Initialization
+// Sync app view from the URL hash (e.g. #/project/NAME)
+function syncFromHash() {
+  const h = (location.hash || '').replace(/^#\/?/, '');
+  if (!h) {
+    selectedProject = null;
+    navTo('projects', false);
+    return;
+  }
+  const parts = h.split('/');
+  if (parts[0] === 'project' && parts[1]) {
+    selectedProject = decodeURIComponent(parts.slice(1).join('/'));
+    navTo('traces', false);
+  } else if (parts[0] === 'projects') {
+    selectedProject = null;
+    navTo('projects', false);
+  } else if (parts[0] === 'settings') {
+    selectedProject = null;
+    navTo('settings', false);
+  } else if (parts[0] === 'traces') {
+    navTo('traces', false);
+  } else {
+    navTo('projects', false);
+  }
+}
+
 window.onload = () => {
   const stored = localStorage.getItem('obs_user');
   if (stored) {
     currentUser = JSON.parse(stored);
     initApp();
+    // restore view from URL if present
+    try { syncFromHash(); } catch (e) {}
   } else {
     document.getElementById('auth-overlay').style.display = 'flex';
   }
@@ -343,6 +370,8 @@ window.onload = () => {
       }
     } catch (err) {}
   });
+  // keep hash in sync for back/forward navigation
+  try { window.addEventListener('hashchange', syncFromHash); } catch (e) {}
 };
 
 function toggleAuthMode() {
@@ -368,6 +397,7 @@ async function handleAuth() {
     localStorage.setItem('obs_user', JSON.stringify(data));
     document.getElementById('auth-overlay').style.display = 'none';
     initApp();
+    try { syncFromHash(); } catch (e) {}
   } catch (e) {
     document.getElementById('auth-error').textContent = e.message;
   }
@@ -398,8 +428,20 @@ async function fetchProjects() {
   } catch (e) {}
 }
 
-function navTo(view) {
+function navTo(view, updateHash = true) {
   currentView = view;
+  // maintain URL hash for reload/back/forward unless explicitly suppressed
+  if (updateHash) {
+    try {
+      if (view === 'projects') location.hash = '#/projects';
+      else if (view === 'settings') location.hash = '#/settings';
+      else if (view === 'traces') {
+        if (selectedProject) location.hash = '#/project/' + encodeURIComponent(selectedProject);
+        else location.hash = '#/traces';
+      }
+    } catch (e) {}
+  }
+
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById(`nav-${view}`)?.classList.add('active');
   
@@ -423,7 +465,9 @@ function openProject(name) {
   tracePage = 1;
   traces = {};
   document.getElementById("search").value = "";
-  navTo('traces');
+  // set hash so reload/back preserves the selected project
+  try { location.hash = '#/project/' + encodeURIComponent(name); } catch (e) {}
+  navTo('traces', false);
 }
 
 function showNewProjectModal() {
@@ -649,7 +693,7 @@ function fmtCost(value) {
   if (abs >= 0.0001) return "$" + n.toFixed(6);
   return "$" + n.toFixed(8);
 }
-function esc(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function esc(s) { return String(s ?? "").replace(/&/g,"&").replace(/</g,"<").replace(/>/g,">"); }
 function resourceColor(r) { return {llm:"#3b82f6",tool:"#10b981",agent:"#f59e0b",chain:"#8b5cf6"}[r]||"#888"; }
 function eventIcon(e) { if (e?.includes("start")) return ">"; if (e?.includes("end") || e?.includes("finish")) return "stop"; if (e?.includes("error")) return "x"; return "-"; }
 

@@ -58,10 +58,13 @@ def _parse_response(response) -> dict:
 
 
 def _detect_framework(req_body: dict, resp_body: dict) -> str:
-    from ..core import _current_framework
+    from ..core import _current_framework, detect_framework_from_stack
     fw = _current_framework()
     if fw:
         return fw
+    stack_fw = detect_framework_from_stack()
+    if stack_fw and stack_fw != "custom":
+        return stack_fw
     if "messages" in req_body or "choices" in resp_body or "usage" in resp_body:
         return "openai-sdk"
     if "contents" in req_body or "candidates" in resp_body or "usageMetadata" in resp_body:

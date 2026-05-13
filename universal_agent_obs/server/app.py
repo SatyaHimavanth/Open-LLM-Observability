@@ -400,7 +400,74 @@ def _estimate_cost_litellm(model: str, prompt: int, completion: int) -> Optional
             completion_tokens=completion,
         )), 8)
     except Exception:
-        return None
+        # Fallback: try local static model prices JSON shipped with the package
+        try:
+            import json
+            from pathlib import Path
+
+            # cache the loaded prices to avoid repeated disk reads
+            global _LOCAL_LITELLM_PRICES
+            if '_LOCAL_LITELLM_PRICES' not in globals() or _LOCAL_LITELLM_PRICES is None:
+                # path: universal_agent_obs/server/static/model_prices_and_context_window.json
+                base = Path(__file__).resolve().parent
+                local_path = base / 'static' / 'model_prices_and_context_window.json'
+                if local_path.exists():
+                    try:
+                        _LOCAL_LITELLM_PRICES = json.loads(local_path.read_text(encoding='utf-8'))
+                    except Exception:
+                        _LOCAL_LITELLM_PRICES = None
+                else:
+                    _LOCAL_LITELLM_PRICES = None
+
+            prices = globals().get('_LOCAL_LITELLM_PRICES')
+            if not prices:
+                return None
+
+            key_model = (model or '').lower()
+
+            # find best matching entry in the prices file
+            best_key = None
+            best_score = 0
+            for k in prices.keys():
+                if k == 'sample_spec':
+                    continue
+                lk = k.lower()
+                score = 0
+                if lk == key_model:
+                    score = 100
+                elif lk in key_model:
+                    score = len(lk)
+                elif key_model in lk:
+                    score = len(key_model)
+                if score > best_score:
+                    best_score = score
+                    best_key = k
+
+            if not best_key:
+                return None
+
+            entry = prices.get(best_key) or {}
+
+            def _get_cost(tokens: int, ent: dict, in_field_candidates=('input_cost_per_token', 'input_cost_per_1k_tokens')) -> float:
+                if not tokens:
+                    return 0.0
+                for f in in_field_candidates:
+                    if f in ent:
+                        val = ent.get(f) or 0.0
+                        if f.endswith('_1k_tokens'):
+                            return (tokens / 1000.0) * float(val)
+                        return tokens * float(val)
+                # try legacy names
+                if 'input_cost_per_1k_tokens' in ent:
+                    return (tokens / 1000.0) * float(ent['input_cost_per_1k_tokens'])
+                return 0.0
+
+            inp_cost = _get_cost(prompt, entry, ('input_cost_per_token', 'input_cost_per_1k_tokens'))
+            out_cost = _get_cost(completion, entry, ('output_cost_per_token', 'output_cost_per_1k_tokens'))
+            total = inp_cost + out_cost
+            return round(float(total), 8)
+        except Exception:
+            return None
 
 
 def _list_trace_summaries(
